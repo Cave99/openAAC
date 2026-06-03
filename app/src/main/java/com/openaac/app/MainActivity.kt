@@ -56,8 +56,15 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
@@ -395,6 +402,38 @@ private object Defaults {
     private fun category(label: String, icon: String = "□") = word(label, icon, label)
 }
 
+private class FolderShape(
+    private val cornerRadius: Dp = 8.dp,
+    private val tabWidthPercent: Float = 0.30f,
+    private val tabHeight: Dp = 10.dp,
+) : Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density
+    ): Outline {
+        val r = cornerRadius.value * density.density
+        val tabW = size.width * tabWidthPercent
+        val tabH = kotlin.math.min(size.height * 0.20f, tabHeight.value * density.density)
+        val path = Path().apply {
+            moveTo(0f, size.height - r)
+            quadraticTo(0f, size.height, r, size.height)
+            lineTo(size.width - r, size.height)
+            quadraticTo(size.width, size.height, size.width, size.height - r)
+            lineTo(size.width, tabH + r)
+            quadraticTo(size.width, tabH, size.width - r, tabH)
+            lineTo(tabW, tabH)
+            lineTo(tabW, r)
+            quadraticTo(tabW, 0f, tabW - r, 0f)
+            lineTo(r, 0f)
+            quadraticTo(0f, 0f, 0f, r)
+            lineTo(0f, tabH)
+            close()
+        }
+        return Outline.Generic(path)
+    }
+}
+
 @Composable
 private fun OpenAacApp() {
     val context = LocalContext.current
@@ -721,31 +760,45 @@ private fun ButtonGrid(buttons: List<VocabButton>, modifier: Modifier, onTap: (V
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun VocabTile(button: VocabButton, modifier: Modifier, onTap: (VocabButton) -> Unit) {
     val isFolder = button.isCategory || button.boardId != null
-    Button(
-        modifier = modifier,
-        shape = if (isFolder) RoundedCornerShape(topStart = 18.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 8.dp) else RoundedCornerShape(8.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = if (isFolder) Color(0xFFFFF4BF) else Color(button.color)),
-        onClick = { onTap(button) },
+    val shape = if (isFolder) FolderShape() else RoundedCornerShape(12.dp)
+    val borderColor = if (isFolder) Color(0xFFFFC94D) else Color(button.color)
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(Color.White)
+            .border(width = 3.dp, color = borderColor, shape = shape)
+            .combinedClickable(onClick = { onTap(button) }),
     ) {
-        Box(Modifier.fillMaxSize()) {
-            if (isFolder) {
-                Box(
-                    Modifier
-                        .align(Alignment.TopStart)
-                        .width(40.dp)
-                        .height(14.dp)
-                        .clip(RoundedCornerShape(topStart = 7.dp, topEnd = 7.dp))
-                        .background(Color(0xFFFFC94D))
-                )
-                Text("folder", modifier = Modifier.align(Alignment.TopEnd), color = Color(0xFF6B5300), fontSize = 10.sp)
-            }
-            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(if (isFolder) "📁" else button.icon, fontSize = if (isFolder) 34.sp else if (button.icon.length > 3) 18.sp else 31.sp, color = Color.Black, maxLines = 1)
-                Text(button.label, color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
+        Column(
+            modifier = Modifier.fillMaxSize().padding(
+                start = 4.dp,
+                end = 4.dp,
+                top = if (isFolder) 14.dp else 6.dp,
+                bottom = 6.dp,
+            ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = button.label,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.Black,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                text = button.icon,
+                fontSize = if (button.icon.length > 3) 18.sp else 28.sp,
+                color = Color.Black,
+                maxLines = 1,
+            )
+            Spacer(modifier = Modifier.weight(1f))
         }
     }
 }
@@ -759,6 +812,7 @@ private fun PinnedStrip(onTap: (VocabButton) -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SuggestionsPanel(result: RecommendationResult, onTap: (VocabButton) -> Unit) {
     Column(
@@ -774,17 +828,42 @@ private fun SuggestionsPanel(result: RecommendationResult, onTap: (VocabButton) 
         Text(result.status, fontSize = 11.sp, color = Color(0xFF56616F), lineHeight = 12.sp)
         result.buttons.forEach { button ->
             val isFolder = button.isCategory || button.boardId != null
-            Button(
-                onClick = { onTap(button) },
+            val shape = if (isFolder) FolderShape(cornerRadius = 8.dp) else RoundedCornerShape(8.dp)
+            val borderColor = if (isFolder) Color(0xFFFFC94D) else Color(button.color)
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                    .weight(1f)
+                    .clip(shape)
+                    .background(Color.White)
+                    .border(2.dp, borderColor, shape)
+                    .combinedClickable(onClick = { onTap(button) }),
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(if (isFolder) "📁" else button.icon, fontSize = if (isFolder) 21.sp else if (button.icon.length > 3) 13.sp else 20.sp, color = Color.Black, maxLines = 1)
-                    Text(button.label, fontSize = 15.sp, color = Color.Black, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(
+                        start = 4.dp,
+                        end = 4.dp,
+                        top = if (isFolder) 9.dp else 4.dp,
+                        bottom = 4.dp,
+                    ),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        button.label,
+                        fontSize = 13.sp,
+                        color = Color.Black,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        button.icon,
+                        fontSize = if (button.icon.length > 3) 13.sp else 18.sp,
+                        color = Color.Black,
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -1010,17 +1089,24 @@ private fun AdminTile(
     onEdit: () -> Unit,
 ) {
     val isFolder = button.isCategory || button.boardId != null
+    val shape = if (isFolder) FolderShape(cornerRadius = 8.dp) else RoundedCornerShape(8.dp)
+    val borderColor = if (selected) Color(0xFF2166F3) else if (isFolder) Color(0xFFFFC94D) else Color(0xFFD7E0EA)
     Column(
         modifier
-            .clip(if (isFolder) RoundedCornerShape(topStart = 18.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 8.dp) else RoundedCornerShape(8.dp))
-            .background(if (selected) Color(0xFFD9E8FF) else if (isFolder) Color(0xFFFFF4BF) else Color(0xFFF2F6FA))
-            .border(2.dp, if (selected) Color(0xFF2166F3) else Color.Transparent, RoundedCornerShape(8.dp))
-            .padding(6.dp),
+            .clip(shape)
+            .background(Color.White)
+            .border(2.dp, borderColor, shape)
+            .padding(
+                start = 6.dp,
+                end = 6.dp,
+                top = if (isFolder) 11.dp else 6.dp,
+                bottom = 6.dp,
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(if (isFolder) "📁" else button.icon, fontSize = if (isFolder) 25.sp else 22.sp)
-        Text(button.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(button.icon, fontSize = if (isFolder) 22.sp else 20.sp, color = Color.Black)
+        Text(button.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.Black, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             OutlinedButton(onClick = onMoveTap, modifier = Modifier.height(32.dp)) { Text("move", fontSize = 11.sp) }
             Button(onClick = onEdit, modifier = Modifier.height(32.dp)) { Text("edit", fontSize = 11.sp) }
