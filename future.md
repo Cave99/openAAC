@@ -1,6 +1,6 @@
 # openAAC Future Ideas
 
-This document tracks future features, research topics, and ideas to revisit. Items here are not commitments. They are possibilities that may improve openAAC once the MVP is working and real users can give feedback.
+This document tracks future features, fixes, and ideas to revisit. Items here are not commitments. Anything already built should be removed from this list so the roadmap stays useful.
 
 ## Guiding Rule
 
@@ -16,61 +16,9 @@ Future features must not compromise the core ideology:
 - No external analytics.
 - No internet permission unless the project owner makes an explicit major direction change.
 
-## Near-Term Improvements
+## Later Improvements
 
-## Better Quick Access
-
-Add a quick access panel that suggests likely next words or phrases.
-
-Possible sources:
-
-- Rule-based paths.
-- Recently used words.
-- Frequently used words.
-- Common word pairs.
-- Time-of-day patterns stored locally.
-
-Example:
-
-If the user often says "I want apple", then after tapping "I" and "want", "apple" should appear quickly without navigating through food categories.
-
-The first implementation should keep the main board path-based while showing suggestions in a side panel.
-
-## Frequency-Based Suggestions
-
-Use local usage history to make suggestions more useful.
-
-Potential features:
-
-- Top next word after current word.
-- Top category after current path.
-- Frequently used phrases.
-- Weekly/monthly/yearly usage trends.
-- Recently used words.
-
-This should be local, explainable, and easy to turn off.
-
-The first implemented version uses local word counts and previous-word to next-word transition counts. Future work can improve this with time-of-day patterns, phrase-level ranking, and better weighting once real tablet use shows what helps.
-
-## Admin Usage Dashboard
-
-Give carers a local view of how the app is being used.
-
-Ideas:
-
-- Most used words this week.
-- Most used words this month.
-- Most used words this year.
-- Unique words used.
-- Number of spoken sentences.
-- New words used recently.
-- Common communication paths.
-
-This is not external analytics. It is a local support tool for carers.
-
-Usage data should distinguish normal child use from carer modeling mode.
-
-## Phrase Shortcuts
+### Phrase Shortcuts
 
 Allow carers to create reusable phrases.
 
@@ -87,11 +35,13 @@ Questions to resolve:
 - Should phrase buttons add multiple words to the sentence bar?
 - Should phrases be shown differently from single words?
 
-Phrase buttons are not part of the first version. First-version buttons should represent single words.
+Phrase buttons should not make ordinary single-word navigation harder to understand.
 
-## Layout Options
+### Layout Options
 
-The first version uses a 4x5 grid. Future versions may support:
+Future versions may support different board densities.
+
+Possible layouts:
 
 - 3x4.
 - 4x5.
@@ -101,25 +51,11 @@ The first version uses a 4x5 grid. Future versions may support:
 
 This should be added only when the layout system is stable.
 
-## Multiple Profiles
-
-Support multiple users on one tablet.
-
-Potential use cases:
-
-- Siblings.
-- Classrooms.
-- Therapy settings.
-
-This is not needed for the first version.
-
-## Switch And Scanning Access
+### Switch And Scanning Access
 
 Investigate support for users who cannot reliably tap buttons.
 
-This is not a first-version focus, but it is worth keeping as a later accessibility investigation.
-
-Switch/scanning access means the app can move focus through buttons automatically or step-by-step, and the user selects an item with one or more external switches or accessible controls instead of directly tapping the screen.
+Switch/scanning access means the app can move focus through buttons automatically or step-by-step, and the user selects an item with one or more external switches or accessible controls instead of directly tapping the tablet grid.
 
 Potential users:
 
@@ -134,11 +70,9 @@ Questions:
 - How should scanning work with the sentence bar and pinned strip?
 - What visual focus indicator is clear enough for AAC use?
 
-## Local Backup And Restore
+### Local Backup And Restore
 
 Support exporting and importing local configuration files.
-
-This comes after the core communication MVP. The first prototype should prioritize communication, editing, speech, backspace behavior, and tracking.
 
 Possible formats:
 
@@ -155,7 +89,7 @@ The backup should include:
 
 Sensitive usage history should be optional during export.
 
-## QR Config Transfer
+### QR Config Transfer
 
 Investigate copying configuration from one tablet to another using QR codes.
 
@@ -172,9 +106,9 @@ Important constraints:
 - No remote storage.
 - Clear confirmation before importing.
 
-## Icon System Expansion
+### Icon System Expansion
 
-Build a large open icon library for practical AAC use.
+Build a larger open icon library for practical AAC use.
 
 Ideas:
 
@@ -200,7 +134,7 @@ Potential categories:
 - Time.
 - Safety and urgent needs.
 
-## Generated Icons
+### Generated Icons
 
 Investigate using generated icons to fill vocabulary gaps.
 
@@ -214,7 +148,7 @@ Requirements:
 
 The app itself should not depend on cloud image generation.
 
-## Offline TTS Improvements
+### Offline TTS Improvements
 
 Investigate higher-quality fully local speech options.
 
@@ -222,13 +156,12 @@ Questions:
 
 - Is Android built-in offline TTS good enough?
 - Which local voices are available by default on common tablets?
-- Can the app detect whether a voice is local or network-backed?
 - Are there open-source offline TTS engines that can be bundled?
 - What is the storage and performance cost?
 
 The voice system should remain local-first.
 
-## Pronunciation Overrides
+### Pronunciation Overrides
 
 Allow carers to control how words are spoken.
 
@@ -240,7 +173,7 @@ Potential options:
 
 This can help with names, places, and unusual words.
 
-## More Languages
+### More Languages
 
 English is the first version. Future language support may include:
 
@@ -255,7 +188,7 @@ Questions:
 - Should icons be shared across languages?
 - How should plural, tense, and grammar differences be handled?
 
-## Better Editing Tools
+### Better Editing Tools
 
 Improve admin workflows.
 
@@ -265,30 +198,12 @@ Ideas:
 - Duplicate a board.
 - Duplicate a word.
 - Move multiple buttons.
-- Search vocabulary.
 - Preview child mode before saving.
 - Undo edit changes.
 - Restore deleted word.
 - Lock individual buttons.
 
-## Templates And Starter Boards
-
-Add starter templates for common environments.
-
-Examples:
-
-- Home.
-- School.
-- Food and drink.
-- Feelings.
-- Body and health.
-- Places.
-- People.
-- Activities.
-
-Templates should remain editable.
-
-## Communication Modeling Mode
+### Communication Modeling Mode
 
 Support carers using the app to model language.
 
@@ -300,20 +215,18 @@ Ideas:
 
 This should not make child mode more complex.
 
-## Safety And Recovery
+### Safety And Recovery
 
-Improve resilience.
+Improve resilience beyond the existing default restore controls.
 
 Ideas:
 
-- Layout reset.
-- Restore default board.
 - Recover deleted vocabulary.
 - Export backup reminder.
 - Validate broken image links.
 - Repair missing icon assets.
 
-## Device And Install Strategy
+### Device And Install Strategy
 
 Future release paths:
 
@@ -329,7 +242,7 @@ Potential documentation:
 - Carer quick-start guide.
 - Admin editing guide.
 
-## iOS Port
+### iOS Port
 
 iOS should be considered after Android feedback.
 
@@ -360,7 +273,7 @@ These should remain out of scope unless the core ideology changes, which it shou
 
 ## Open Questions
 
-- Is Android built-in local TTS good enough for the first release?
 - What default vocabulary size is useful without overwhelming the child?
 - What backup format is easiest for non-technical carers?
 - What icon style is clearest for the target users?
+- How should multiple local profiles be switched without making child mode confusing?
