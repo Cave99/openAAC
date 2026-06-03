@@ -136,6 +136,7 @@ private data class VocabButton(
     val isCategory: Boolean = false,
     val imagePath: String? = null,
     val addToSentence: Boolean = true,
+    val grammarRole: GrammarRole = GrammarRole.Object,
 )
 
 private data class SentenceToken(
@@ -143,7 +144,25 @@ private data class SentenceToken(
     val speech: String,
     val icon: String,
     val imagePath: String?,
+    val grammarRole: GrammarRole,
+    val boardId: String?,
 )
+
+private enum class GrammarRole(val title: String, val help: String) {
+    Subject("Subject", "I, you, Mum, Dad, teacher"),
+    Intent("Intent", "want, need"),
+    Negation("Negation", "don't, do not, not"),
+    Action("Action", "go, help, play, wash, like"),
+    Object("Object", "toy, book, blanket, general things"),
+    FoodDrink("Food or drink", "water, apple, snack, cup"),
+    Place("Place", "home, school, outside, shops"),
+    Toilet("Toilet", "toilet, bathroom"),
+    Feeling("Feeling", "happy, sad, sick, tired"),
+    BodyPart("Body part", "head, hand, tummy, mouth"),
+    Modifier("Modifier", "now, more"),
+    Response("Response", "yes, no, finished, stop"),
+    None("No grammar", "speak exactly as tapped"),
+}
 
 private data class VoiceOption(
     val name: String,
@@ -175,6 +194,7 @@ private object Store {
     private const val KEY_TRANSITIONS = "transition_counts"
     private const val KEY_VOICE_NAME = "voice_name"
     private const val KEY_SPEECH_RATE = "speech_rate"
+    private const val KEY_GRAMMAR_CORRECTION = "grammar_correction"
     private const val KEY_PROFILES = "profiles"
     private const val KEY_CURRENT_PROFILE = "current_profile"
     private const val THIRTY_DAYS_MS = 30L * 24L * 60L * 60L * 1000L
@@ -264,6 +284,13 @@ private object Store {
         prefs(context).edit().putFloat(profileKey(context, KEY_SPEECH_RATE), rate.coerceIn(0.6f, 1.4f)).apply()
     }
 
+    fun grammarCorrectionEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(profileKey(context, KEY_GRAMMAR_CORRECTION), true)
+
+    fun saveGrammarCorrectionEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(profileKey(context, KEY_GRAMMAR_CORRECTION), enabled).apply()
+    }
+
     fun homeButtons(context: Context): List<VocabButton> {
         val raw = prefs(context).getString(profileKey(context, KEY_HOME), null)
             ?: prefs(context).getString(KEY_HOME, null)
@@ -347,6 +374,7 @@ private object Store {
             .remove(profileKey(context, KEY_TRANSITIONS))
             .remove(profileKey(context, KEY_VOICE_NAME))
             .remove(profileKey(context, KEY_SPEECH_RATE))
+            .remove(profileKey(context, KEY_GRAMMAR_CORRECTION))
             .apply()
     }
 
@@ -521,6 +549,7 @@ private object Store {
                         icon = source.icon,
                         imagePath = source.imagePath,
                         addToSentence = if (source.boardId != null) source.addToSentence else button.addToSentence,
+                        grammarRole = source.grammarRole,
                     )
                 } else {
                     button
@@ -562,6 +591,7 @@ private object Store {
         .put("isCategory", isCategory)
         .put("imagePath", imagePath)
         .put("addToSentence", addToSentence)
+        .put("grammarRole", grammarRole.name)
 
     private fun JSONObject.toButton() = VocabButton(
         id = optString("id"),
@@ -573,6 +603,14 @@ private object Store {
         isCategory = optBoolean("isCategory", false),
         imagePath = optString("imagePath").ifBlank { null },
         addToSentence = optBoolean("addToSentence", true),
+        grammarRole = optString("grammarRole")
+            .takeIf { it.isNotBlank() }
+            ?.let { raw -> GrammarRole.entries.firstOrNull { it.name == raw } }
+            ?: inferGrammarRole(
+                label = optString("label"),
+                speech = optString("speech", optString("label")),
+                boardId = optString("boardId").ifBlank { null },
+            ),
     )
 }
 
@@ -587,38 +625,279 @@ private data class RecommendationResult(
     val status: String,
 )
 
+private fun inferGrammarRole(label: String, speech: String = label, boardId: String? = null): GrammarRole {
+    val text = speech.ifBlank { label }.normalizedGrammarText()
+    val board = boardId?.normalizedGrammarText()
+    return when {
+        text in setOf("i", "you", "me", "mum", "dad", "friend", "teacher") -> GrammarRole.Subject
+        text in setOf("want", "need") -> GrammarRole.Intent
+        text in setOf("don't", "dont", "do not", "not") -> GrammarRole.Negation
+        text in setOf("go", "help", "play", "wash", "rest", "like", "have", "drink", "eat", "hurts", "hurt") -> GrammarRole.Action
+        text in setOf("home", "school", "outside", "shops") || board == "places" -> GrammarRole.Place
+        text in setOf("toilet", "bathroom") || board == "toilet" -> GrammarRole.Toilet
+        text in setOf("food", "drink", "water", "juice", "milk", "cup", "apple", "banana", "bread", "snack") ||
+            board in setOf("food", "drink") -> GrammarRole.FoodDrink
+        text in setOf("happy", "sad", "sick", "tired", "angry") || board == "feel" -> GrammarRole.Feeling
+        text in setOf("head", "hand", "mouth", "tummy") || board == "body" -> GrammarRole.BodyPart
+        text in setOf("more", "now") -> GrammarRole.Modifier
+        text in setOf("yes", "no", "stop", "finished") -> GrammarRole.Response
+        board != null -> GrammarRole.Object
+        else -> GrammarRole.Object
+    }
+}
+
+private fun String.normalizedGrammarText(): String =
+    lowercase(Locale.ROOT).trim().replace(Regex("\\s+"), " ")
+
+private object GrammarEngine {
+    fun realize(tokens: List<SentenceToken>, enabled: Boolean): String {
+        val raw = tokens.joinToString(" ") { it.speech }.trim()
+        if (!enabled || tokens.isEmpty()) return raw
+
+        val usable = tokens.filter { it.grammarRole != GrammarRole.None && it.speech.isNotBlank() }
+        if (usable.isEmpty()) return raw
+
+        val words = usable.map { it.speech.trim() }
+        val normalized = words.map { it.normalizedGrammarText() }
+        if (normalized.size == 1) return singleWord(usable.first())
+
+        val sentences = splitClauses(usable)
+            .flatMap { renderClause(it) }
+            .filter { it.isNotBlank() }
+        if (sentences.isNotEmpty()) return sentences.joinToString(" ")
+
+        return cleanup(raw)
+    }
+
+    private fun splitClauses(tokens: List<SentenceToken>): List<List<SentenceToken>> {
+        val clauses = mutableListOf<List<SentenceToken>>()
+        val current = mutableListOf<SentenceToken>()
+
+        tokens.forEach { token ->
+            val hasContent = current.any { it.grammarRole != GrammarRole.Subject }
+            val startsNewSubject = token.grammarRole == GrammarRole.Subject && hasContent
+            val startsNewIntent = token.grammarRole == GrammarRole.Intent &&
+                current.any { it.grammarRole in setOf(GrammarRole.Feeling, GrammarRole.Toilet, GrammarRole.Place, GrammarRole.Response) }
+            if (current.isNotEmpty() && (startsNewSubject || startsNewIntent)) {
+                clauses.add(current.toList())
+                current.clear()
+            }
+            current.add(token)
+        }
+        if (current.isNotEmpty()) clauses.add(current.toList())
+        return clauses
+    }
+
+    private fun renderClause(tokens: List<SentenceToken>): List<String> {
+        negationSentence(tokens)?.let { return listOf(it) }
+        painSentence(tokens)?.let { return listOf(it) }
+        bodySymptomSentence(tokens)?.let { return listOf(it) }
+
+        val primary = toiletSentence(tokens)
+            ?: placeSentence(tokens)
+            ?: actionRequestSentence(tokens)
+            ?: requestSentence(tokens)
+            ?: helpSentence(tokens)
+        if (primary != null) {
+            return listOfNotNull(primary, feelingSentence(tokens.takeLastWhile { it.grammarRole == GrammarRole.Feeling }))
+        }
+
+        feelingSentence(tokens)?.let { return listOf(it) }
+        return listOf(cleanup(tokens.joinToString(" ") { it.speech }))
+    }
+
+    private fun singleWord(token: SentenceToken): String {
+        val text = token.speech.trim()
+        return when (token.grammarRole) {
+            GrammarRole.Toilet -> "toilet"
+            else -> text
+        }
+    }
+
+    private fun painSentence(tokens: List<SentenceToken>): String? {
+        val bodyPart = tokens.firstOrNull { it.grammarRole == GrammarRole.BodyPart }?.speech?.trim() ?: return null
+        val hasPain = tokens.any { it.speech.normalizedGrammarText() in setOf("hurt", "hurts", "sore", "pain") }
+        if (!hasPain) return null
+        val owner = if (tokens.firstOrNull { it.grammarRole == GrammarRole.Subject }?.speech?.normalizedGrammarText() == "you") "Your" else "My"
+        return "$owner $bodyPart hurts."
+    }
+
+    private fun bodySymptomSentence(tokens: List<SentenceToken>): String? {
+        val bodyPart = tokens.firstOrNull { it.grammarRole == GrammarRole.BodyPart }?.speech?.trim() ?: return null
+        val symptom = tokens.firstOrNull {
+            it.grammarRole == GrammarRole.Feeling &&
+                it.speech.normalizedGrammarText() in setOf("sick", "tired", "sore")
+        }?.speech?.trim() ?: return null
+        val owner = if (tokens.firstOrNull { it.grammarRole == GrammarRole.Subject }?.speech?.normalizedGrammarText() == "you") "Your" else "My"
+        return "$owner $bodyPart feels $symptom."
+    }
+
+    private fun feelingSentence(tokens: List<SentenceToken>): String? {
+        if (tokens.any { it.isNegation() }) return null
+        val feelings = tokens
+            .filter { it.grammarRole == GrammarRole.Feeling }
+            .map { it.speech.trim() }
+            .filter { it.isNotBlank() && it.normalizedGrammarText() != "feel" }
+            .distinctBy { it.normalizedGrammarText() }
+        if (feelings.isEmpty()) return null
+        val subject = subjectText(tokens) ?: "I"
+        return "$subject ${verbForSubject(subject, "feel", "feels")} ${feelings.joinForSpeech()}."
+    }
+
+    private fun negationSentence(tokens: List<SentenceToken>): String? {
+        if (tokens.none { it.isNegation() }) return null
+        val subject = subjectText(tokens) ?: "I"
+        val negation = negationForSubject(subject)
+        val action = tokens.firstOrNull {
+            it.grammarRole == GrammarRole.Action &&
+                it.speech.normalizedGrammarText() !in setOf("hurt", "hurts")
+        }?.speech?.normalizedGrammarText()
+        val intent = intentText(tokens)
+
+        val toilet = tokens.firstOrNull { it.grammarRole == GrammarRole.Toilet }?.speech?.trim()
+        val place = tokens.firstOrNull { it.grammarRole == GrammarRole.Place }?.speech?.trim()
+        val feeling = tokens
+            .filter { it.grammarRole == GrammarRole.Feeling }
+            .map { it.speech.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.normalizedGrammarText() }
+            .joinForSpeech()
+        val target = tokens.firstOrNull {
+            it.grammarRole in setOf(GrammarRole.Object, GrammarRole.FoodDrink) &&
+                it.speech.normalizedGrammarText() !in setOf("food", "drink", "things")
+        }?.speech?.trim()
+
+        return when {
+            action == "feel" && feeling.isNotBlank() -> "$subject $negation feel $feeling."
+            action == "like" && place != null -> "$subject $negation like $place."
+            action == "like" && toilet != null -> "$subject $negation like ${toiletArticle(toilet)}$toilet."
+            action == "like" && target != null -> "$subject $negation like $target."
+            action == "go" && place != null -> "$subject $negation want to go $place."
+            action == "go" && toilet != null -> "$subject $negation want to go to ${toiletArticle(toilet)}$toilet."
+            intent != null && toilet != null -> "$subject $negation $intent to go to ${toiletArticle(toilet)}$toilet."
+            intent != null && place != null -> "$subject $negation $intent to go $place."
+            intent != null && target != null -> "$subject $negation $intent $target."
+            feeling.isNotBlank() -> "$subject $negation feel $feeling."
+            target != null -> "$subject $negation want $target."
+            else -> cleanup(tokens.joinToString(" ") { it.speech })
+        }
+    }
+
+    private fun toiletSentence(tokens: List<SentenceToken>): String? {
+        if (tokens.none { it.grammarRole == GrammarRole.Toilet }) return null
+        val subject = subjectText(tokens) ?: "I"
+        val intent = intentText(tokens) ?: "want"
+        val toilet = tokens.firstOrNull { it.grammarRole == GrammarRole.Toilet }?.speech?.trim().orEmpty()
+        return "$subject ${verbForSubject(subject, intent, "${intent}s")} to go to ${toiletArticle(toilet)}$toilet."
+    }
+
+    private fun placeSentence(tokens: List<SentenceToken>): String? {
+        val place = tokens.firstOrNull { it.grammarRole == GrammarRole.Place }?.speech?.trim() ?: return null
+        val hasGo = tokens.any { it.speech.normalizedGrammarText() == "go" || it.boardId?.normalizedGrammarText() == "go" }
+        if (!hasGo && tokens.none { it.grammarRole == GrammarRole.Intent }) return null
+        val subject = subjectText(tokens) ?: "I"
+        val intent = intentText(tokens) ?: "want"
+        return "$subject ${verbForSubject(subject, intent, "${intent}s")} to go $place."
+    }
+
+    private fun requestSentence(tokens: List<SentenceToken>): String? {
+        val intent = intentText(tokens) ?: return null
+        val subject = subjectText(tokens) ?: "I"
+        val target = tokens.firstOrNull {
+            it.grammarRole in setOf(GrammarRole.Object, GrammarRole.FoodDrink) &&
+                it.speech.normalizedGrammarText() !in setOf("food", "drink", "things")
+        }?.speech?.trim() ?: return null
+        val determiner = if (tokens.firstOrNull { it.grammarRole == GrammarRole.FoodDrink } != null) "some " else ""
+        return "$subject ${verbForSubject(subject, intent, "${intent}s")} $determiner$target."
+    }
+
+    private fun actionRequestSentence(tokens: List<SentenceToken>): String? {
+        val intent = intentText(tokens) ?: return null
+        val subject = subjectText(tokens) ?: "I"
+        val action = tokens.firstOrNull {
+            it.grammarRole == GrammarRole.Action &&
+                it.speech.normalizedGrammarText() !in setOf("feel", "go", "help", "hurt", "hurts")
+        }?.speech?.trim() ?: return null
+        val target = tokens.firstOrNull {
+            it.grammarRole in setOf(GrammarRole.Object, GrammarRole.FoodDrink) &&
+                it.speech.normalizedGrammarText() !in setOf("food", "drink", "things")
+        }?.speech?.trim()
+        val suffix = target?.let { " $it" }.orEmpty()
+        return "$subject ${verbForSubject(subject, intent, "${intent}s")} to $action$suffix."
+    }
+
+    private fun helpSentence(tokens: List<SentenceToken>): String? {
+        if (tokens.none { it.speech.normalizedGrammarText() == "help" }) return null
+        val subject = subjectText(tokens)
+        return if (subject?.normalizedGrammarText() == "you") "Can you help me?" else "I need help."
+    }
+
+    private fun subjectText(tokens: List<SentenceToken>): String? =
+        tokens.firstOrNull { it.grammarRole == GrammarRole.Subject }?.speech?.trim()?.replaceFirstChar {
+            if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString()
+        }
+
+    private fun intentText(tokens: List<SentenceToken>): String? =
+        tokens.firstOrNull { it.grammarRole == GrammarRole.Intent }?.speech?.normalizedGrammarText()
+
+    private fun verbForSubject(subject: String, firstPerson: String, thirdPerson: String): String =
+        if (subject.normalizedGrammarText() in setOf("i", "you")) firstPerson else thirdPerson
+
+    private fun negationForSubject(subject: String): String =
+        if (subject.normalizedGrammarText() in setOf("i", "you")) "don't" else "doesn't"
+
+    private fun toiletArticle(toilet: String): String =
+        if (toilet.normalizedGrammarText() in setOf("toilet", "bathroom")) "the " else ""
+
+    private fun SentenceToken.isNegation(): Boolean =
+        grammarRole == GrammarRole.Negation || speech.normalizedGrammarText() in setOf("don't", "dont", "do not", "not")
+
+    private fun cleanup(text: String): String {
+        val trimmed = text.trim().replace(Regex("\\s+"), " ")
+        return if (trimmed.endsWith(".") || trimmed.endsWith("?") || trimmed.endsWith("!")) trimmed else "$trimmed."
+    }
+
+    private fun List<String>.joinForSpeech(): String =
+        when (size) {
+            0 -> ""
+            1 -> first()
+            2 -> "${first()} and ${last()}"
+            else -> dropLast(1).joinToString(", ") + ", and " + last()
+        }
+}
+
 private object Defaults {
     const val HOME_BOARD = "home"
 
     val pinned = listOf(
-        VocabButton("pin_yes", "yes", "yes", "✓", 0xFFA8E6A1),
-        VocabButton("pin_no", "no", "no", "✕", 0xFFFFB3A7),
-        VocabButton("pin_more", "more", "more", "+", 0xFFFFE08A),
-        VocabButton("pin_help", "help", "help", "?", 0xFFFFC36E),
-        VocabButton("pin_stop", "stop", "stop", "STOP", 0xFFFF6B6B),
+        VocabButton("pin_yes", "yes", "yes", "✓", 0xFFA8E6A1, grammarRole = GrammarRole.Response),
+        VocabButton("pin_no", "no", "no", "✕", 0xFFFFB3A7, grammarRole = GrammarRole.Response),
+        VocabButton("pin_more", "more", "more", "+", 0xFFFFE08A, grammarRole = GrammarRole.Modifier),
+        VocabButton("pin_help", "help", "help", "?", 0xFFFFC36E, grammarRole = GrammarRole.Action),
+        VocabButton("pin_stop", "stop", "stop", "STOP", 0xFFFF6B6B, grammarRole = GrammarRole.Response),
     )
 
     val home = listOf(
-        VocabButton("i", "I", "I", "☝", 0xFFFFFFFF, "i", true),
-        VocabButton("you", "you", "you", "👤", 0xFFFFFFFF, "you", true),
-        VocabButton("want", "want", "want", "★", 0xFFFFF3A3, "want", true),
-        VocabButton("need", "need", "need", "!", 0xFFFFD1A8, "need", true),
-        VocabButton("go", "go", "go", "→", 0xFFB8F5C7, "go", true),
-        VocabButton("food", "food", "food", "🍎", 0xFFFFDFA6, "food", true),
-        VocabButton("drink", "drink", "drink", "🥤", 0xFFAEE8FF, "drink", true),
-        VocabButton("toilet", "toilet", "toilet", "🚽", 0xFFD8E6FF, "toilet", true),
-        VocabButton("people", "people", "people", "●●", 0xFFFFC98F, "people", true),
-        VocabButton("places", "places", "places", "⌂", 0xFFBDE8C9, "places", true),
-        VocabButton("home", "home", "home", "⌂", 0xFFBDE8C9),
-        VocabButton("school", "school", "school", "▣", 0xFFCDEB91),
-        VocabButton("play", "play", "play", "▶", 0xFFD7B5FF, "play", true),
-        VocabButton("feel", "feel", "feel", "☺", 0xFFFFC6E3, "feel", true),
-        VocabButton("body", "body", "body", "✋", 0xFFAEE8FF, "body", true),
-        VocabButton("like", "like", "like", "♡", 0xFFFFF3A3),
-        VocabButton("dont", "don't", "don't", "✕", 0xFFFFB3A7),
-        VocabButton("have", "have", "have", "▣", 0xFFFFFFFF),
-        VocabButton("things", "things", "things", "□", 0xFFE0E0E0, "things", true),
-        VocabButton("finished", "finished", "finished", "✓", 0xFFCFCFCF),
+        VocabButton("i", "I", "I", "☝", 0xFFFFFFFF, "i", true, grammarRole = GrammarRole.Subject),
+        VocabButton("you", "you", "you", "👤", 0xFFFFFFFF, "you", true, grammarRole = GrammarRole.Subject),
+        VocabButton("want", "want", "want", "★", 0xFFFFF3A3, "want", true, grammarRole = GrammarRole.Intent),
+        VocabButton("need", "need", "need", "!", 0xFFFFD1A8, "need", true, grammarRole = GrammarRole.Intent),
+        VocabButton("go", "go", "go", "→", 0xFFB8F5C7, "go", true, grammarRole = GrammarRole.Action),
+        VocabButton("food", "food", "food", "🍎", 0xFFFFDFA6, "food", true, grammarRole = GrammarRole.FoodDrink),
+        VocabButton("drink", "drink", "drink", "🥤", 0xFFAEE8FF, "drink", true, grammarRole = GrammarRole.FoodDrink),
+        VocabButton("toilet", "toilet", "toilet", "🚽", 0xFFD8E6FF, "toilet", true, grammarRole = GrammarRole.Toilet),
+        VocabButton("people", "people", "people", "●●", 0xFFFFC98F, "people", true, grammarRole = GrammarRole.Subject),
+        VocabButton("places", "places", "places", "⌂", 0xFFBDE8C9, "places", true, grammarRole = GrammarRole.Place),
+        VocabButton("home", "home", "home", "⌂", 0xFFBDE8C9, grammarRole = GrammarRole.Place),
+        VocabButton("school", "school", "school", "▣", 0xFFCDEB91, grammarRole = GrammarRole.Place),
+        VocabButton("play", "play", "play", "▶", 0xFFD7B5FF, "play", true, grammarRole = GrammarRole.Action),
+        VocabButton("feel", "feel", "feel", "☺", 0xFFFFC6E3, "feel", true, grammarRole = GrammarRole.Action),
+        VocabButton("body", "body", "body", "✋", 0xFFAEE8FF, "body", true, grammarRole = GrammarRole.BodyPart),
+        VocabButton("like", "like", "like", "♡", 0xFFFFF3A3, grammarRole = GrammarRole.Action),
+        VocabButton("dont", "don't", "don't", "✕", 0xFFFFB3A7, grammarRole = GrammarRole.Negation),
+        VocabButton("have", "have", "have", "▣", 0xFFFFFFFF, grammarRole = GrammarRole.Action),
+        VocabButton("things", "things", "things", "□", 0xFFE0E0E0, "things", true, grammarRole = GrammarRole.Object),
+        VocabButton("finished", "finished", "finished", "✓", 0xFFCFCFCF, grammarRole = GrammarRole.Response),
     )
 
     val boards: Map<String, List<VocabButton>> = mapOf(
@@ -651,6 +930,7 @@ private object Defaults {
         color = color,
         boardId = boardId,
         isCategory = boardId != null,
+        grammarRole = inferGrammarRole(label = label, boardId = boardId),
     )
 
     private fun category(label: String, icon: String = "□") =
@@ -945,6 +1225,7 @@ private fun CommunicatorScreen(
     var pendingDeleteIndex by remember { mutableStateOf<Int?>(null) }
     var recommendationRefresh by remember { mutableStateOf(0) }
     var usageRefresh by remember { mutableStateOf(0) }
+    var grammarCorrectionEnabled by remember { mutableStateOf(Store.grammarCorrectionEnabled(context)) }
 
     LaunchedEffect(currentProfile.id) {
         boardsById = Store.boards(context)
@@ -955,6 +1236,7 @@ private fun CommunicatorScreen(
         showAddButton = false
         editingButtonIndex = null
         pendingDeleteIndex = null
+        grammarCorrectionEnabled = Store.grammarCorrectionEnabled(context)
         recommendationRefresh++
         usageRefresh++
     }
@@ -980,7 +1262,7 @@ private fun CommunicatorScreen(
         }
         if (button.addToSentence) {
             val previous = sentence.lastOrNull()?.label
-            sentence.add(SentenceToken(button.label, button.speech, button.icon, button.imagePath))
+            sentence.add(SentenceToken(button.label, button.speech, button.icon, button.imagePath, button.grammarRole, button.boardId))
             speakWord(button.speech)
             Store.trackWord(context, button.label)
             Store.trackTransition(context, previous, button.label)
@@ -1050,7 +1332,7 @@ private fun CommunicatorScreen(
                     sentence = sentence,
                     speaking = sentenceSpeaking,
                     onSpeak = {
-                        val spoken = sentence.joinToString(" ") { it.speech }
+                        val spoken = GrammarEngine.realize(sentence, grammarCorrectionEnabled)
                         speakSentence(spoken)
                         Store.trackSentence(context, spoken)
                     },
@@ -1124,6 +1406,7 @@ private fun CommunicatorScreen(
                 recommendationRefresh++
                 usageRefresh++
                 onSpeechRateChanged(1.0f)
+                grammarCorrectionEnabled = true
                 voiceOptions.firstOrNull()?.let { onVoiceSelected(it.name) }
             },
             onWipeLearning = {
@@ -1140,6 +1423,11 @@ private fun CommunicatorScreen(
             speechRate = speechRate,
             onVoiceSelected = onVoiceSelected,
             onSpeechRateChanged = onSpeechRateChanged,
+            grammarCorrectionEnabled = grammarCorrectionEnabled,
+            onGrammarCorrectionChanged = {
+                grammarCorrectionEnabled = it
+                Store.saveGrammarCorrectionEnabled(context, it)
+            },
             onTestVoice = { speakWord("I want food") },
             usageRefresh = usageRefresh,
             onEnterReorganize = {
@@ -1745,6 +2033,8 @@ private fun AdminScreen(
     speechRate: Float,
     onVoiceSelected: (String) -> Unit,
     onSpeechRateChanged: (Float) -> Unit,
+    grammarCorrectionEnabled: Boolean,
+    onGrammarCorrectionChanged: (Boolean) -> Unit,
     onTestVoice: () -> Unit,
     usageRefresh: Int,
     onEnterReorganize: () -> Unit,
@@ -1811,6 +2101,10 @@ private fun AdminScreen(
                             onVoiceSelected = onVoiceSelected,
                             onSpeechRateChanged = onSpeechRateChanged,
                             onTestVoice = onTestVoice,
+                        )
+                        GrammarControls(
+                            enabled = grammarCorrectionEnabled,
+                            onToggle = { onGrammarCorrectionChanged(!grammarCorrectionEnabled) },
                         )
                         UsageDashboard(insights)
                     }
@@ -2085,6 +2379,29 @@ private fun VoiceControls(
 }
 
 @Composable
+private fun GrammarControls(enabled: Boolean, onToggle: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFF4F7F1))) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Grammar correction", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    if (enabled) "Speak sentence uses local fixed grammar templates." else "Speak sentence uses tapped words exactly.",
+                    fontSize = 13.sp,
+                    color = Color(0xFF56616F),
+                )
+            }
+            OutlinedButton(onClick = onToggle) {
+                Text(if (enabled) "on" else "off")
+            }
+        }
+    }
+}
+
+@Composable
 private fun AddButtonDialog(
     boards: Map<String, List<VocabButton>>,
     onDismiss: () -> Unit,
@@ -2100,6 +2417,7 @@ private fun AddButtonDialog(
     var createFolder by remember { mutableStateOf(false) }
     var buttonColor by remember { mutableStateOf(ButtonPalette.colors.last().value) }
     var folderAddsToSentence by remember { mutableStateOf(true) }
+    var grammarRole by remember { mutableStateOf(GrammarRole.Object) }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) imagePath = Store.copyImageToPrivateStorage(context, uri)
     }
@@ -2173,6 +2491,11 @@ private fun AddButtonDialog(
                     if (speech.isBlank()) speech = it.take(32)
                 }, label = { Text("Label") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(speech, { speech = it.take(32) }, label = { Text("Speech") }, modifier = Modifier.fillMaxWidth())
+                GrammarRoleDropdown(
+                    selected = grammarRole,
+                    onSelected = { grammarRole = it },
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 OutlinedTextField(icon, { icon = it.take(4) }, label = { Text("Icon text") }, modifier = Modifier.fillMaxWidth())
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     ButtonVisual(icon.ifBlank { "□" }, imagePath, Modifier.size(54.dp), 28)
@@ -2221,6 +2544,7 @@ private fun AddButtonDialog(
                                     isCategory = boardId != null,
                                     imagePath = imagePath,
                                     addToSentence = if (boardId != null) folderAddsToSentence else true,
+                                    grammarRole = grammarRole,
                                 )
                             )
                         },
@@ -2228,6 +2552,41 @@ private fun AddButtonDialog(
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun GrammarRoleDropdown(
+    selected: GrammarRole,
+    onSelected: (GrammarRole) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Grammar role", fontSize = 14.sp, color = Color(0xFF56616F))
+        Box {
+            OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+                Text(selected.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                GrammarRole.entries.forEach { role ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(role.title, fontSize = 15.sp)
+                                Text(role.help, fontSize = 12.sp, color = Color(0xFF56616F), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        },
+                        onClick = {
+                            expanded = false
+                            onSelected(role)
+                        },
+                    )
+                }
+            }
+        }
+        Text(selected.help, fontSize = 12.sp, color = Color(0xFF56616F))
     }
 }
 
@@ -2292,6 +2651,7 @@ private fun EditButtonDialog(item: VocabButton, onDismiss: () -> Unit, onSave: (
     var folderPath by remember(item.id) { mutableStateOf(item.boardId.orEmpty()) }
     var buttonColor by remember(item.id) { mutableStateOf(item.color) }
     var addToSentence by remember(item.id) { mutableStateOf(item.addToSentence) }
+    var grammarRole by remember(item.id) { mutableStateOf(item.grammarRole) }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) imagePath = Store.copyImageToPrivateStorage(context, uri)
     }
@@ -2310,6 +2670,8 @@ private fun EditButtonDialog(item: VocabButton, onDismiss: () -> Unit, onSave: (
                 OutlinedTextField(label, { label = it.take(18) }, label = { Text("Label") })
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(speech, { speech = it.take(32) }, label = { Text("Speech") })
+                Spacer(Modifier.height(8.dp))
+                GrammarRoleDropdown(selected = grammarRole, onSelected = { grammarRole = it })
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(icon, { icon = it.take(4) }, label = { Text("Icon text") })
                 Spacer(Modifier.height(8.dp))
@@ -2351,6 +2713,7 @@ private fun EditButtonDialog(item: VocabButton, onDismiss: () -> Unit, onSave: (
                                 isCategory = normalizedPath != null,
                                 imagePath = imagePath,
                                 addToSentence = if (normalizedPath != null) addToSentence else true,
+                                grammarRole = grammarRole,
                             )
                         )
                     }) { Text("save") }
