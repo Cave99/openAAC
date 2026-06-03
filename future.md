@@ -50,6 +50,8 @@ Potential features:
 
 This should be local, explainable, and easy to turn off.
 
+The first implemented version uses local word counts and previous-word to next-word transition counts. Future work can improve this with time-of-day patterns, phrase-level ranking, and better weighting once real tablet use shows what helps.
+
 ## Admin Usage Dashboard
 
 Give carers a local view of how the app is being used.

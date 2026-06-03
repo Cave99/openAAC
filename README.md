@@ -43,6 +43,7 @@ The MVP should include:
 - Fixed bottom pinned-word strip.
 - Top sentence bar with icons and text.
 - Speak sentence, backspace, long-press clear, and `?`/`hmm` controls.
+- Local quick recommendations that start rule-based and learn from repeated word sequences.
 - Configurable vocabulary packs.
 - Custom words and images.
 - Local usage tracking and admin insights.
@@ -78,3 +79,15 @@ Install on a connected Android tablet with:
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+## Recommendations
+
+The quick panel is fully local. It starts with simple rule-based suggestions, then learns from word taps and repeated next-word patterns on the device.
+
+Expected behavior:
+
+- Immediately useful: common starter suggestions.
+- After a few repeated phrases: starts to personalize common next words.
+- After a week or two of regular use: recommendations should feel noticeably better for routine phrases.
+
+No recommendation data leaves the tablet.

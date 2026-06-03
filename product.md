@@ -293,6 +293,8 @@ Exact spoken sentence history should expire after about 30 days. Aggregate stati
 
 Usage tracking should be enabled by default. Admin mode should include a modeling mode so carers can use the app to demonstrate communication without mixing their own modeled language into the child's usage analytics.
 
+The first recommendation system should be local and explainable. It should begin with rule-based common paths, then learn from repeated word taps and next-word transitions. Onboarding should explain that recommendations are useful immediately as starter paths, usually start personalizing after a few repeated phrases, and tend to become noticeably better after a week or two of regular use.
+
 ## MVP Scope
 
 The first meaningful MVP should include:

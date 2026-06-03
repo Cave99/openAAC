@@ -482,9 +482,12 @@ private fun CommunicatorScreen(speak: (String) -> Unit) {
                 onBackspace = { if (sentence.isNotEmpty()) sentence.removeAt(sentence.lastIndex) },
                 onClear = { sentence.clear() },
                 onQuestion = {
+                    val previous = sentence.lastOrNull()?.label
                     sentence.add(SentenceToken("?", "hmm", "?"))
                     speak("hmm")
                     Store.trackWord(context, "hmm")
+                    Store.trackTransition(context, previous, "hmm")
+                    recommendationRefresh++
                 },
                 onAdmin = { showAdminLogin = true },
             )

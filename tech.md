@@ -404,6 +404,22 @@ The recommendation system should remain:
 
 The first implementation should support a side suggestion panel while the main board navigates into the active word/category path.
 
+The side suggestion panel should be actionable. Tapping a recommendation should add the word to the sentence, speak it, track the word, track the previous-word transition, and navigate if the recommendation opens a board.
+
+Recommendation data should include:
+
+- Local word counts.
+- Local previous-word to next-word transition counts.
+- Rule-based fallbacks for cold start.
+- Current board fallback suggestions.
+
+Recommendation status labels should be simple:
+
+- Starter suggestions.
+- Collecting patterns.
+- Starting to personalize.
+- Learning from regular use.
+
 ## Default Board Seed
 
 The first seed data should create this home board:
