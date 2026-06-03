@@ -10,6 +10,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -49,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -151,6 +155,14 @@ private object Store {
 
     fun restoreDefaultLayout(context: Context) {
         prefs(context).edit().remove(KEY_HOME).apply()
+    }
+
+    fun wipeLearnedHistory(context: Context) {
+        prefs(context).edit()
+            .remove(KEY_SENTENCES)
+            .remove(KEY_COUNTS)
+            .remove(KEY_TRANSITIONS)
+            .apply()
     }
 
     fun restoreAllDefaults(context: Context) {
@@ -465,6 +477,8 @@ private fun SetupScreen(onComplete: (String) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
             .padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -517,6 +531,7 @@ private fun CommunicatorScreen(
     var showAdminLogin by remember { mutableStateOf(false) }
     var showAdmin by remember { mutableStateOf(false) }
     var recommendationRefresh by remember { mutableStateOf(0) }
+    var usageRefresh by remember { mutableStateOf(0) }
 
     val currentBoard = boardStack.lastOrNull()
     val buttons = currentBoard?.let { Defaults.boards[it] } ?: homeButtons
@@ -614,8 +629,15 @@ private fun CommunicatorScreen(
                 homeButtons = Defaults.home
                 sentence.clear()
                 boardStack.clear()
+                recommendationRefresh++
+                usageRefresh++
                 onSpeechRateChanged(1.0f)
                 voiceOptions.firstOrNull()?.let { onVoiceSelected(it.name) }
+            },
+            onWipeLearning = {
+                Store.wipeLearnedHistory(context)
+                recommendationRefresh++
+                usageRefresh++
             },
             voiceOptions = voiceOptions,
             selectedVoiceName = selectedVoiceName,
@@ -623,6 +645,7 @@ private fun CommunicatorScreen(
             onVoiceSelected = onVoiceSelected,
             onSpeechRateChanged = onSpeechRateChanged,
             onTestVoice = { speak("I want food") },
+            usageRefresh = usageRefresh,
             onClose = { showAdmin = false },
         )
     }
@@ -812,11 +835,18 @@ private fun BackspaceButton(onBackspace: () -> Unit, onClear: () -> Unit) {
 @Composable
 private fun AdminLogin(onDismiss: () -> Unit, onSuccess: () -> Unit) {
     val context = LocalContext.current
+    val keyboard = LocalSoftwareKeyboardController.current
     var passcode by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
     FullScreenOverlay {
         Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
-            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                Modifier
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
                 Text("Admin", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(passcode, { passcode = it.filter(Char::isDigit).take(8) }, label = { Text("Passcode") })
@@ -825,7 +855,12 @@ private fun AdminLogin(onDismiss: () -> Unit, onSuccess: () -> Unit) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(onClick = onDismiss) { Text("cancel") }
                     Button(onClick = {
-                        if (passcode == Store.passcode(context)) onSuccess() else error = true
+                        if (passcode == Store.passcode(context)) {
+                            keyboard?.hide()
+                            onSuccess()
+                        } else {
+                            error = true
+                        }
                     }) { Text("open") }
                 }
             }
@@ -839,19 +874,21 @@ private fun AdminScreen(
     onButtonsChanged: (List<VocabButton>) -> Unit,
     onRestoreLayout: () -> Unit,
     onRestoreAll: () -> Unit,
+    onWipeLearning: () -> Unit,
     voiceOptions: List<VoiceOption>,
     selectedVoiceName: String?,
     speechRate: Float,
     onVoiceSelected: (String) -> Unit,
     onSpeechRateChanged: (Float) -> Unit,
     onTestVoice: () -> Unit,
+    usageRefresh: Int,
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
     var editingIndex by remember { mutableStateOf<Int?>(null) }
     var selectedIndex by remember { mutableStateOf<Int?>(null) }
     val usage = remember { mutableStateMapOf<String, Int>() }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(usageRefresh) {
         usage.clear()
         Store.usageSummary(context).forEach { usage[it.first] = it.second }
     }
@@ -906,6 +943,10 @@ private fun AdminScreen(
                             next.add(VocabButton("custom_${System.currentTimeMillis()}", "new", "new", "□", 0xFFFFFFFF))
                             onButtonsChanged(next.take(20))
                         }) { Text("add home word") }
+                        OutlinedButton(onClick = {
+                            onWipeLearning()
+                            usage.clear()
+                        }) { Text("wipe learned history") }
                         selectedIndex?.let { index ->
                             OutlinedButton(onClick = { selectedIndex = null }) {
                                 Text("cancel move ${index + 1}")
@@ -1030,6 +1071,7 @@ private fun VoiceControls(
 
 @Composable
 private fun EditButtonDialog(item: VocabButton, onDismiss: () -> Unit, onSave: (VocabButton) -> Unit) {
+    val keyboard = LocalSoftwareKeyboardController.current
     var label by remember(item.id) { mutableStateOf(item.label) }
     var speech by remember(item.id) { mutableStateOf(item.speech) }
     var icon by remember(item.id) { mutableStateOf(item.icon) }
@@ -1037,7 +1079,13 @@ private fun EditButtonDialog(item: VocabButton, onDismiss: () -> Unit, onSave: (
 
     FullScreenOverlay {
         Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
-            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                Modifier
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
                 Text("Edit word", fontSize = 26.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(label, { label = it.take(18) }, label = { Text("Label") })
@@ -1050,9 +1098,13 @@ private fun EditButtonDialog(item: VocabButton, onDismiss: () -> Unit, onSave: (
                 Text("Examples: want, need, food, drink, toilet, people, places, play, feel, body, things", fontSize = 12.sp, color = Color(0xFF56616F), textAlign = TextAlign.Center)
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(onClick = onDismiss) { Text("cancel") }
+                    OutlinedButton(onClick = {
+                        keyboard?.hide()
+                        onDismiss()
+                    }) { Text("cancel") }
                     Button(onClick = {
                         val normalizedPath = folderPath.ifBlank { null }
+                        keyboard?.hide()
                         onSave(
                             item.copy(
                                 label = label.ifBlank { item.label },
@@ -1074,6 +1126,7 @@ private fun FullScreenOverlay(content: @Composable () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
+            .imePadding()
             .background(Color(0x99000000))
             .padding(24.dp),
         contentAlignment = Alignment.Center,
