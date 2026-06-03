@@ -1,11 +1,18 @@
 package com.openaac.app
 
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -15,10 +22,12 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +51,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -52,7 +64,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -62,8 +73,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,6 +91,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -120,17 +134,33 @@ private data class VocabButton(
     val color: Long,
     val boardId: String? = null,
     val isCategory: Boolean = false,
+    val imagePath: String? = null,
+    val addToSentence: Boolean = true,
 )
 
 private data class SentenceToken(
     val label: String,
     val speech: String,
     val icon: String,
+    val imagePath: String?,
 )
 
 private data class VoiceOption(
     val name: String,
     val label: String,
+)
+
+private data class ChildProfile(
+    val id: String,
+    val name: String,
+)
+
+private data class UsageInsights(
+    val uniqueWordsThisMonth: Int,
+    val uniqueWordsPreviousMonth: Int,
+    val uniqueTrend: Int,
+    val topWords: List<Pair<String, Int>>,
+    val topSentences: List<Pair<String, Int>>,
 )
 
 private object Store {
@@ -141,10 +171,15 @@ private object Store {
     private const val KEY_BOARDS = "board_layouts"
     private const val KEY_SENTENCES = "sentence_history"
     private const val KEY_COUNTS = "usage_counts"
+    private const val KEY_WORD_EVENTS = "word_events"
     private const val KEY_TRANSITIONS = "transition_counts"
     private const val KEY_VOICE_NAME = "voice_name"
     private const val KEY_SPEECH_RATE = "speech_rate"
+    private const val KEY_PROFILES = "profiles"
+    private const val KEY_CURRENT_PROFILE = "current_profile"
     private const val THIRTY_DAYS_MS = 30L * 24L * 60L * 60L * 1000L
+    private const val SIXTY_DAYS_MS = 60L * 24L * 60L * 60L * 1000L
+    private const val DEFAULT_PROFILE_ID = "default"
 
     fun isSetup(context: Context): Boolean =
         prefs(context).getBoolean(KEY_SETUP, false)
@@ -163,22 +198,76 @@ private object Store {
         prefs(context).edit().putString(KEY_PASSCODE, passcode).apply()
     }
 
+    fun profiles(context: Context): List<ChildProfile> {
+        val raw = prefs(context).getString(KEY_PROFILES, null)
+        val parsed = runCatching {
+            if (raw.isNullOrBlank()) emptyList() else {
+                val array = JSONArray(raw)
+                List(array.length()) { index ->
+                    val item = array.getJSONObject(index)
+                    ChildProfile(
+                        id = item.optString("id", DEFAULT_PROFILE_ID).ifBlank { DEFAULT_PROFILE_ID },
+                        name = item.optString("name", "Child").ifBlank { "Child" },
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+        return parsed.ifEmpty { listOf(ChildProfile(DEFAULT_PROFILE_ID, "Child")) }
+    }
+
+    fun currentProfile(context: Context): ChildProfile {
+        val all = profiles(context)
+        val currentId = prefs(context).getString(KEY_CURRENT_PROFILE, DEFAULT_PROFILE_ID) ?: DEFAULT_PROFILE_ID
+        return all.firstOrNull { it.id == currentId } ?: all.first()
+    }
+
+    fun saveCurrentProfile(context: Context, profileId: String) {
+        val safeId = profiles(context).firstOrNull { it.id == profileId }?.id ?: DEFAULT_PROFILE_ID
+        prefs(context).edit().putString(KEY_CURRENT_PROFILE, safeId).apply()
+    }
+
+    fun addProfile(context: Context, name: String): ChildProfile {
+        val cleanName = name.trim().take(24).ifBlank { "Child ${profiles(context).size + 1}" }
+        val baseId = cleanName.normalizedId().ifBlank { "profile" }
+        val existing = profiles(context).map { it.id }.toSet()
+        var nextId = baseId
+        var suffix = 2
+        while (nextId in existing) {
+            nextId = "${baseId}_$suffix"
+            suffix++
+        }
+        val profile = ChildProfile(nextId, cleanName)
+        saveProfiles(context, profiles(context) + profile)
+        saveCurrentProfile(context, profile.id)
+        return profile
+    }
+
+    private fun saveProfiles(context: Context, profiles: List<ChildProfile>) {
+        val array = JSONArray()
+        profiles.distinctBy { it.id }.forEach { profile ->
+            array.put(JSONObject().put("id", profile.id).put("name", profile.name))
+        }
+        prefs(context).edit().putString(KEY_PROFILES, array.toString()).apply()
+    }
+
     fun voiceName(context: Context): String? =
-        prefs(context).getString(KEY_VOICE_NAME, null)
+        prefs(context).getString(profileKey(context, KEY_VOICE_NAME), null)
 
     fun saveVoiceName(context: Context, voiceName: String) {
-        prefs(context).edit().putString(KEY_VOICE_NAME, voiceName).apply()
+        prefs(context).edit().putString(profileKey(context, KEY_VOICE_NAME), voiceName).apply()
     }
 
     fun speechRate(context: Context): Float =
-        prefs(context).getFloat(KEY_SPEECH_RATE, 1.0f)
+        prefs(context).getFloat(profileKey(context, KEY_SPEECH_RATE), 1.0f)
 
     fun saveSpeechRate(context: Context, rate: Float) {
-        prefs(context).edit().putFloat(KEY_SPEECH_RATE, rate.coerceIn(0.6f, 1.4f)).apply()
+        prefs(context).edit().putFloat(profileKey(context, KEY_SPEECH_RATE), rate.coerceIn(0.6f, 1.4f)).apply()
     }
 
     fun homeButtons(context: Context): List<VocabButton> {
-        val raw = prefs(context).getString(KEY_HOME, null) ?: return Defaults.home
+        val raw = prefs(context).getString(profileKey(context, KEY_HOME), null)
+            ?: prefs(context).getString(KEY_HOME, null)
+            ?: return Defaults.home
         return runCatching {
             val array = JSONArray(raw)
             List(array.length()) { index -> array.getJSONObject(index).toButton() }
@@ -188,20 +277,23 @@ private object Store {
     fun saveHomeButtons(context: Context, buttons: List<VocabButton>) {
         val array = JSONArray()
         buttons.forEach { array.put(it.toJson()) }
-        prefs(context).edit().putString(KEY_HOME, array.toString()).apply()
+        prefs(context).edit().putString(profileKey(context, KEY_HOME), array.toString()).apply()
     }
 
     fun boards(context: Context): Map<String, List<VocabButton>> {
         val fallback = Defaults.allBoards()
-        val raw = prefs(context).getString(KEY_BOARDS, null)
+        val raw = prefs(context).getString(profileKey(context, KEY_BOARDS), null)
+            ?: prefs(context).getString(KEY_BOARDS, null)?.takeIf { currentProfile(context).id == DEFAULT_PROFILE_ID }
         if (raw.isNullOrBlank()) {
-            val legacyHome = prefs(context).getString(KEY_HOME, null)?.let {
+            val legacyHome = prefs(context).getString(profileKey(context, KEY_HOME), null)
+                ?: prefs(context).getString(KEY_HOME, null)?.takeIf { currentProfile(context).id == DEFAULT_PROFILE_ID }
+            val parsedLegacyHome = legacyHome?.let {
                 runCatching {
                     val array = JSONArray(it)
                     List(array.length()) { index -> array.getJSONObject(index).toButton() }
                 }.getOrNull()
             }
-            return if (legacyHome == null) fallback else fallback + (Defaults.HOME_BOARD to legacyHome)
+            return if (parsedLegacyHome == null) fallback else fallback + (Defaults.HOME_BOARD to parsedLegacyHome)
         }
         return runCatching {
             val source = JSONObject(raw)
@@ -222,71 +314,123 @@ private object Store {
             root.put(boardId, array)
         }
         prefs(context).edit()
-            .putString(KEY_BOARDS, root.toString())
-            .putString(KEY_HOME, JSONArray().also { array ->
+            .putString(profileKey(context, KEY_BOARDS), root.toString())
+            .putString(profileKey(context, KEY_HOME), JSONArray().also { array ->
                 boards[Defaults.HOME_BOARD].orEmpty().forEach { array.put(it.toJson()) }
             }.toString())
             .apply()
     }
 
     fun restoreDefaultLayout(context: Context) {
-        prefs(context).edit().remove(KEY_HOME).remove(KEY_BOARDS).apply()
+        prefs(context).edit()
+            .remove(profileKey(context, KEY_HOME))
+            .remove(profileKey(context, KEY_BOARDS))
+            .apply()
     }
 
     fun wipeLearnedHistory(context: Context) {
         prefs(context).edit()
-            .remove(KEY_SENTENCES)
-            .remove(KEY_COUNTS)
-            .remove(KEY_TRANSITIONS)
+            .remove(profileKey(context, KEY_SENTENCES))
+            .remove(profileKey(context, KEY_COUNTS))
+            .remove(profileKey(context, KEY_WORD_EVENTS))
+            .remove(profileKey(context, KEY_TRANSITIONS))
             .apply()
     }
 
     fun restoreAllDefaults(context: Context) {
         prefs(context).edit()
-            .remove(KEY_HOME)
-            .remove(KEY_BOARDS)
-            .remove(KEY_SENTENCES)
-            .remove(KEY_COUNTS)
-            .remove(KEY_TRANSITIONS)
-            .remove(KEY_VOICE_NAME)
-            .remove(KEY_SPEECH_RATE)
+            .remove(profileKey(context, KEY_HOME))
+            .remove(profileKey(context, KEY_BOARDS))
+            .remove(profileKey(context, KEY_SENTENCES))
+            .remove(profileKey(context, KEY_COUNTS))
+            .remove(profileKey(context, KEY_WORD_EVENTS))
+            .remove(profileKey(context, KEY_TRANSITIONS))
+            .remove(profileKey(context, KEY_VOICE_NAME))
+            .remove(profileKey(context, KEY_SPEECH_RATE))
             .apply()
     }
 
     fun trackWord(context: Context, label: String) {
-        val counts = JSONObject(prefs(context).getString(KEY_COUNTS, "{}") ?: "{}")
+        val counts = JSONObject(prefs(context).getString(profileKey(context, KEY_COUNTS), "{}") ?: "{}")
         counts.put(label, counts.optInt(label, 0) + 1)
-        prefs(context).edit().putString(KEY_COUNTS, counts.toString()).apply()
+        val now = System.currentTimeMillis()
+        val events = JSONArray(prefs(context).getString(profileKey(context, KEY_WORD_EVENTS), "[]") ?: "[]")
+        val fresh = JSONArray()
+        for (index in 0 until events.length()) {
+            val item = events.getJSONObject(index)
+            if (now - item.optLong("at", 0L) <= SIXTY_DAYS_MS) fresh.put(item)
+        }
+        fresh.put(JSONObject().put("at", now).put("word", label))
+        prefs(context).edit()
+            .putString(profileKey(context, KEY_COUNTS), counts.toString())
+            .putString(profileKey(context, KEY_WORD_EVENTS), fresh.toString())
+            .apply()
     }
 
     fun trackTransition(context: Context, previous: String?, next: String) {
         if (previous.isNullOrBlank() || next.isBlank()) return
-        val transitions = JSONObject(prefs(context).getString(KEY_TRANSITIONS, "{}") ?: "{}")
+        val transitions = JSONObject(prefs(context).getString(profileKey(context, KEY_TRANSITIONS), "{}") ?: "{}")
         val key = transitionKey(previous, next)
         transitions.put(key, transitions.optInt(key, 0) + 1)
-        prefs(context).edit().putString(KEY_TRANSITIONS, transitions.toString()).apply()
+        prefs(context).edit().putString(profileKey(context, KEY_TRANSITIONS), transitions.toString()).apply()
     }
 
     fun trackSentence(context: Context, spoken: String) {
         if (spoken.isBlank()) return
         val now = System.currentTimeMillis()
-        val source = JSONArray(prefs(context).getString(KEY_SENTENCES, "[]") ?: "[]")
+        val source = JSONArray(prefs(context).getString(profileKey(context, KEY_SENTENCES), "[]") ?: "[]")
         val fresh = JSONArray()
         for (index in 0 until source.length()) {
             val item = source.getJSONObject(index)
             if (now - item.optLong("at", 0L) <= THIRTY_DAYS_MS) fresh.put(item)
         }
         fresh.put(JSONObject().put("at", now).put("spoken", spoken))
-        prefs(context).edit().putString(KEY_SENTENCES, fresh.toString()).apply()
+        prefs(context).edit().putString(profileKey(context, KEY_SENTENCES), fresh.toString()).apply()
     }
 
-    fun usageSummary(context: Context): List<Pair<String, Int>> {
-        val counts = JSONObject(prefs(context).getString(KEY_COUNTS, "{}") ?: "{}")
-        return counts.keys().asSequence()
+    fun usageInsights(context: Context): UsageInsights {
+        val counts = JSONObject(prefs(context).getString(profileKey(context, KEY_COUNTS), "{}") ?: "{}")
+        val now = System.currentTimeMillis()
+        val currentStart = now - THIRTY_DAYS_MS
+        val previousStart = now - SIXTY_DAYS_MS
+        val currentWords = mutableSetOf<String>()
+        val previousWords = mutableSetOf<String>()
+        val events = JSONArray(prefs(context).getString(profileKey(context, KEY_WORD_EVENTS), "[]") ?: "[]")
+        for (index in 0 until events.length()) {
+            val item = events.getJSONObject(index)
+            val at = item.optLong("at", 0L)
+            val word = item.optString("word").trim()
+            if (word.isBlank()) continue
+            when {
+                at >= currentStart -> currentWords.add(word.normalized())
+                at >= previousStart -> previousWords.add(word.normalized())
+            }
+        }
+
+        val sentenceCounts = linkedMapOf<String, Int>()
+        val sentences = JSONArray(prefs(context).getString(profileKey(context, KEY_SENTENCES), "[]") ?: "[]")
+        for (index in 0 until sentences.length()) {
+            val spoken = sentences.getJSONObject(index).optString("spoken").trim()
+            if (spoken.isNotBlank()) sentenceCounts[spoken] = (sentenceCounts[spoken] ?: 0) + 1
+        }
+
+        val topWords = counts.keys().asSequence()
             .map { it to counts.optInt(it) }
+            .filter { it.first.isNotBlank() && it.second > 0 }
             .sortedByDescending { it.second }
-            .take(10)
+            .take(3)
             .toList()
+        val topSentences = sentenceCounts.entries
+            .sortedByDescending { it.value }
+            .take(3)
+            .map { it.key to it.value }
+        return UsageInsights(
+            uniqueWordsThisMonth = currentWords.size,
+            uniqueWordsPreviousMonth = previousWords.size,
+            uniqueTrend = currentWords.size - previousWords.size,
+            topWords = topWords,
+            topSentences = topSentences,
+        )
     }
 
     fun recommendations(
@@ -300,8 +444,8 @@ private object Store {
             .distinctBy { it.label.normalized() }
             .associateBy { it.label.normalized() }
 
-        val counts = JSONObject(prefs(context).getString(KEY_COUNTS, "{}") ?: "{}")
-        val transitions = JSONObject(prefs(context).getString(KEY_TRANSITIONS, "{}") ?: "{}")
+        val counts = JSONObject(prefs(context).getString(profileKey(context, KEY_COUNTS), "{}") ?: "{}")
+        val transitions = JSONObject(prefs(context).getString(profileKey(context, KEY_TRANSITIONS), "{}") ?: "{}")
         val scores = linkedMapOf<String, RecommendationScore>()
 
         if (!lastWord.isNullOrBlank()) {
@@ -352,6 +496,39 @@ private object Store {
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    private fun profileKey(context: Context, key: String): String =
+        "${currentProfile(context).id}_$key"
+
+    fun copyImageToPrivateStorage(context: Context, uri: Uri): String? {
+        return runCatching {
+            val profileId = currentProfile(context).id
+            val dir = File(context.filesDir, "profiles/$profileId/images").apply { mkdirs() }
+            val target = File(dir, "image_${System.currentTimeMillis()}.jpg")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            } ?: return null
+            target.absolutePath
+        }.getOrNull()
+    }
+
+    fun applySharedVisuals(boards: Map<String, List<VocabButton>>, source: VocabButton): Map<String, List<VocabButton>> {
+        val targetLabel = source.label.normalized()
+        if (targetLabel.isBlank()) return boards
+        return boards.mapValues { (_, buttons) ->
+            buttons.map { button ->
+                if (button.label.normalized() == targetLabel) {
+                    button.copy(
+                        icon = source.icon,
+                        imagePath = source.imagePath,
+                        addToSentence = if (source.boardId != null) source.addToSentence else button.addToSentence,
+                    )
+                } else {
+                    button
+                }
+            }
+        }
+    }
+
     private fun transitionKey(previous: String, next: String) = "${previous.normalized()}>${next.normalized()}"
 
     private fun String.normalized() = lowercase(Locale.ROOT).trim()
@@ -383,6 +560,8 @@ private object Store {
         .put("color", color)
         .put("boardId", boardId)
         .put("isCategory", isCategory)
+        .put("imagePath", imagePath)
+        .put("addToSentence", addToSentence)
 
     private fun JSONObject.toButton() = VocabButton(
         id = optString("id"),
@@ -392,6 +571,8 @@ private object Store {
         color = optLong("color", 0xFFFFFFFF),
         boardId = optString("boardId").ifBlank { null },
         isCategory = optBoolean("isCategory", false),
+        imagePath = optString("imagePath").ifBlank { null },
+        addToSentence = optBoolean("addToSentence", true),
     )
 }
 
@@ -461,19 +642,48 @@ private object Defaults {
         label: String,
         icon: String = "□",
         boardId: String? = null,
+        color: Long = 0xFFFFFFFF,
     ) = VocabButton(
         id = label.lowercase(Locale.ROOT).replace(" ", "_"),
         label = label,
         speech = label,
         icon = icon,
-        color = 0xFFFFFFFF,
+        color = color,
         boardId = boardId,
         isCategory = boardId != null,
     )
 
-    private fun category(label: String, icon: String = "□") = word(label, icon, label)
+    private fun category(label: String, icon: String = "□") =
+        word(label, icon, label, colorForFolder(label))
 
     fun allBoards(): Map<String, List<VocabButton>> = boards + (HOME_BOARD to home)
+
+    private fun colorForFolder(label: String): Long =
+        ButtonPalette.colors.firstOrNull { it.label.equals(label, ignoreCase = true) }?.value
+            ?: ButtonPalette.colors[(kotlin.math.abs(label.hashCode()) % ButtonPalette.colors.size)].value
+}
+
+private data class FolderColorOption(
+    val label: String,
+    val value: Long,
+)
+
+private object ButtonPalette {
+    val colors = listOf(
+        FolderColorOption("want", 0xFFFFF3A3),
+        FolderColorOption("need", 0xFFFFD1A8),
+        FolderColorOption("go", 0xFFB8F5C7),
+        FolderColorOption("food", 0xFFFFDFA6),
+        FolderColorOption("drink", 0xFFAEE8FF),
+        FolderColorOption("toilet", 0xFFD8E6FF),
+        FolderColorOption("people", 0xFFFFC98F),
+        FolderColorOption("places", 0xFFBDE8C9),
+        FolderColorOption("play", 0xFFD7B5FF),
+        FolderColorOption("feel", 0xFFFFC6E3),
+        FolderColorOption("body", 0xFFA9D6C9),
+        FolderColorOption("things", 0xFFE0E0E0),
+        FolderColorOption("plain", 0xFFFFFFFF),
+    )
 }
 
 private fun String.normalizedId(): String =
@@ -534,6 +744,10 @@ private fun OpenAacApp() {
     var voiceOptions by remember { mutableStateOf(emptyList<VoiceOption>()) }
     var selectedVoiceName by remember { mutableStateOf(Store.voiceName(context)) }
     var speechRate by remember { mutableStateOf(Store.speechRate(context)) }
+    var currentProfile by remember { mutableStateOf(Store.currentProfile(context)) }
+    var profileList by remember { mutableStateOf(Store.profiles(context)) }
+    var sentenceSpeaking by remember { mutableStateOf(false) }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     DisposableEffect(Unit) {
         val engine = TextToSpeech(context) { status ->
@@ -541,6 +755,32 @@ private fun OpenAacApp() {
                 ttsReady = true
             }
         }
+        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {
+                if (utteranceId?.startsWith("sentence_") == true) {
+                    mainHandler.post { sentenceSpeaking = true }
+                }
+            }
+
+            override fun onDone(utteranceId: String?) {
+                if (utteranceId?.startsWith("sentence_") == true) {
+                    mainHandler.post { sentenceSpeaking = false }
+                }
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) {
+                if (utteranceId?.startsWith("sentence_") == true) {
+                    mainHandler.post { sentenceSpeaking = false }
+                }
+            }
+
+            override fun onError(utteranceId: String?, errorCode: Int) {
+                if (utteranceId?.startsWith("sentence_") == true) {
+                    mainHandler.post { sentenceSpeaking = false }
+                }
+            }
+        })
         tts = engine
         onDispose { engine.shutdown() }
     }
@@ -571,8 +811,20 @@ private fun OpenAacApp() {
         engine.setSpeechRate(speechRate)
     }
 
-    val speak: (String) -> Unit = { text ->
-        if (ttsReady && text.isNotBlank()) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, text)
+    val speakWord: (String) -> Unit = { text ->
+        if (ttsReady && text.isNotBlank()) {
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "word_${System.currentTimeMillis()}")
+        }
+    }
+    val speakSentence: (String) -> Unit = { text ->
+        if (ttsReady && text.isNotBlank()) {
+            sentenceSpeaking = true
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sentence_${System.currentTimeMillis()}")
+        }
+    }
+    val stopSpeech: () -> Unit = {
+        tts?.stop()
+        sentenceSpeaking = false
     }
 
     if (!setupComplete) {
@@ -582,7 +834,26 @@ private fun OpenAacApp() {
         })
     } else {
         CommunicatorScreen(
-            speak = speak,
+            speakWord = speakWord,
+            speakSentence = speakSentence,
+            stopSpeech = stopSpeech,
+            sentenceSpeaking = sentenceSpeaking,
+            currentProfile = currentProfile,
+            profiles = profileList,
+            onProfileSelected = { profileId ->
+                Store.saveCurrentProfile(context, profileId)
+                currentProfile = Store.currentProfile(context)
+                profileList = Store.profiles(context)
+                selectedVoiceName = Store.voiceName(context)
+                speechRate = Store.speechRate(context)
+            },
+            onAddProfile = { name ->
+                val profile = Store.addProfile(context, name)
+                currentProfile = profile
+                profileList = Store.profiles(context)
+                selectedVoiceName = Store.voiceName(context)
+                speechRate = Store.speechRate(context)
+            },
             voiceOptions = voiceOptions,
             selectedVoiceName = selectedVoiceName,
             speechRate = speechRate,
@@ -647,7 +918,14 @@ private fun SetupScreen(onComplete: (String) -> Unit) {
 
 @Composable
 private fun CommunicatorScreen(
-    speak: (String) -> Unit,
+    speakWord: (String) -> Unit,
+    speakSentence: (String) -> Unit,
+    stopSpeech: () -> Unit,
+    sentenceSpeaking: Boolean,
+    currentProfile: ChildProfile,
+    profiles: List<ChildProfile>,
+    onProfileSelected: (String) -> Unit,
+    onAddProfile: (String) -> Unit,
     voiceOptions: List<VoiceOption>,
     selectedVoiceName: String?,
     speechRate: Float,
@@ -664,8 +942,22 @@ private fun CommunicatorScreen(
     var reorganizing by remember { mutableStateOf(false) }
     var showAddButton by remember { mutableStateOf(false) }
     var editingButtonIndex by remember { mutableStateOf<Int?>(null) }
+    var pendingDeleteIndex by remember { mutableStateOf<Int?>(null) }
     var recommendationRefresh by remember { mutableStateOf(0) }
     var usageRefresh by remember { mutableStateOf(0) }
+
+    LaunchedEffect(currentProfile.id) {
+        boardsById = Store.boards(context)
+        draftBoards = boardsById
+        sentence.clear()
+        boardStack.clear()
+        reorganizing = false
+        showAddButton = false
+        editingButtonIndex = null
+        pendingDeleteIndex = null
+        recommendationRefresh++
+        usageRefresh++
+    }
 
     val currentBoard = boardStack.lastOrNull()
     val currentBoardId = currentBoard ?: Defaults.HOME_BOARD
@@ -686,12 +978,14 @@ private fun CommunicatorScreen(
             button.boardId?.let { boardStack.add(it) }
             return
         }
-        val previous = sentence.lastOrNull()?.label
-        sentence.add(SentenceToken(button.label, button.speech, button.icon))
-        speak(button.speech)
-        Store.trackWord(context, button.label)
-        Store.trackTransition(context, previous, button.label)
-        recommendationRefresh++
+        if (button.addToSentence) {
+            val previous = sentence.lastOrNull()?.label
+            sentence.add(SentenceToken(button.label, button.speech, button.icon, button.imagePath))
+            speakWord(button.speech)
+            Store.trackWord(context, button.label)
+            Store.trackTransition(context, previous, button.label)
+            recommendationRefresh++
+        }
         button.boardId?.let { boardStack.add(it) }
     }
 
@@ -725,7 +1019,7 @@ private fun CommunicatorScreen(
         button.boardId?.let { boardId ->
             nextBoards.putIfAbsent(boardId, emptyList())
         }
-        draftBoards = nextBoards
+        draftBoards = Store.applySharedVisuals(nextBoards, button)
     }
 
     Row(Modifier.fillMaxSize().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -754,20 +1048,17 @@ private fun CommunicatorScreen(
             } else {
                 SentenceBar(
                     sentence = sentence,
+                    speaking = sentenceSpeaking,
                     onSpeak = {
                         val spoken = sentence.joinToString(" ") { it.speech }
-                        speak(spoken)
+                        speakSentence(spoken)
                         Store.trackSentence(context, spoken)
                     },
+                    onStop = stopSpeech,
                     onBackspace = { if (sentence.isNotEmpty()) sentence.removeAt(sentence.lastIndex) },
                     onClear = { sentence.clear() },
-                    onQuestion = {
-                        val previous = sentence.lastOrNull()?.label
-                        sentence.add(SentenceToken("?", "hmm", "?"))
-                        speak("hmm")
-                        Store.trackWord(context, "hmm")
-                        Store.trackTransition(context, previous, "hmm")
-                        recommendationRefresh++
+                    onRemoveAt = { index ->
+                        if (index in sentence.indices) sentence.removeAt(index)
                     },
                     onAdmin = { showAdminLogin = true },
                 )
@@ -788,6 +1079,7 @@ private fun CommunicatorScreen(
                     reorganizing = reorganizing,
                     onMove = ::moveDraftButton,
                     onEdit = { editingButtonIndex = it },
+                    onDelete = { pendingDeleteIndex = it },
                 )
 
                 if (!reorganizing) {
@@ -839,12 +1131,16 @@ private fun CommunicatorScreen(
                 recommendationRefresh++
                 usageRefresh++
             },
+            currentProfile = currentProfile,
+            profiles = profiles,
+            onProfileSelected = onProfileSelected,
+            onAddProfile = onAddProfile,
             voiceOptions = voiceOptions,
             selectedVoiceName = selectedVoiceName,
             speechRate = speechRate,
             onVoiceSelected = onVoiceSelected,
             onSpeechRateChanged = onSpeechRateChanged,
-            onTestVoice = { speak("I want food") },
+            onTestVoice = { speakWord("I want food") },
             usageRefresh = usageRefresh,
             onEnterReorganize = {
                 draftBoards = boardsById
@@ -879,13 +1175,31 @@ private fun CommunicatorScreen(
                         nextButtons[index] = updated
                         nextBoards[currentBoardId] = nextButtons
                         updated.boardId?.let { nextBoards.putIfAbsent(it, emptyList()) }
-                        draftBoards = nextBoards
+                        draftBoards = Store.applySharedVisuals(nextBoards, updated)
                     }
                     editingButtonIndex = null
                 },
             )
         } ?: run {
             editingButtonIndex = null
+        }
+    }
+
+    pendingDeleteIndex?.let { index ->
+        draftBoards[currentBoardId]?.getOrNull(index)?.let { item ->
+            ConfirmDeleteDialog(
+                label = item.label,
+                onDismiss = { pendingDeleteIndex = null },
+                onConfirm = {
+                    val nextBoards = draftBoards.toMutableMap()
+                    nextBoards[currentBoardId] = nextBoards[currentBoardId].orEmpty()
+                        .filterIndexed { buttonIndex, _ -> buttonIndex != index }
+                    draftBoards = nextBoards
+                    pendingDeleteIndex = null
+                },
+            )
+        } ?: run {
+            pendingDeleteIndex = null
         }
     }
 }
@@ -930,12 +1244,18 @@ private fun ReorganizeBar(
 @Composable
 private fun SentenceBar(
     sentence: List<SentenceToken>,
+    speaking: Boolean,
     onSpeak: () -> Unit,
+    onStop: () -> Unit,
     onBackspace: () -> Unit,
     onClear: () -> Unit,
-    onQuestion: () -> Unit,
+    onRemoveAt: (Int) -> Unit,
     onAdmin: () -> Unit,
 ) {
+    var selectedIndex by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(sentence.size) {
+        if (selectedIndex != null && selectedIndex !in sentence.indices) selectedIndex = null
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -947,38 +1267,79 @@ private fun SentenceBar(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        ActionButton(
+            label = if (speaking) "stop" else "speak",
+            icon = if (speaking) "■" else "▶",
+            color = if (speaking) Color(0xFFE05555) else Color(0xFF2166F3),
+            onClick = if (speaking) onStop else onSpeak,
+        )
         Row(
-            Modifier.weight(1f).fillMaxHeight(),
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            sentence.takeLast(8).forEach {
-                SentenceChip(it)
+            sentence.forEachIndexed { index, token ->
+                SentenceChip(
+                    token = token,
+                    selected = selectedIndex == index,
+                    onTap = {
+                        if (selectedIndex == index) {
+                            onRemoveAt(index)
+                            selectedIndex = null
+                        } else {
+                            selectedIndex = index
+                        }
+                    },
+                )
             }
         }
-        ActionButton("speak", "▶", Color(0xFF2166F3), onSpeak)
-        BackspaceButton(onBackspace = onBackspace, onClear = onClear)
-        ActionButton("hmm", "?", Color(0xFFFFD36E), onQuestion)
+        BackspaceButton(onBackspace = onBackspace)
+        ActionButton("clear", "×", Color(0xFFE05555), onClear)
         OutlinedButton(onClick = onAdmin, modifier = Modifier.height(70.dp)) {
             Text("admin", fontSize = 15.sp)
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SentenceChip(token: SentenceToken) {
-    Column(
+private fun SentenceChip(token: SentenceToken, selected: Boolean, onTap: () -> Unit) {
+    Box(
         Modifier
             .width(82.dp)
             .fillMaxHeight()
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFFF2F6FA))
-            .padding(6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+            .background(if (selected) Color(0xFFFFE6E6) else Color(0xFFF2F6FA))
+            .border(
+                width = if (selected) 3.dp else 0.dp,
+                color = if (selected) Color(0xFFE05555) else Color.Transparent,
+                shape = RoundedCornerShape(8.dp),
+            )
+            .combinedClickable(onClick = onTap),
     ) {
-        Text(token.icon, fontSize = 24.sp, maxLines = 1)
-        Text(token.label, fontSize = 15.sp, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Column(
+            Modifier.fillMaxSize().padding(6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            ButtonVisual(icon = token.icon, imagePath = token.imagePath, modifier = Modifier.size(36.dp), iconFontSize = 24)
+            Text(token.label, fontSize = 15.sp, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        if (selected) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .size(22.dp)
+                    .clip(RoundedCornerShape(bottomStart = 6.dp))
+                    .background(Color(0xFFE05555)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("×", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }
 
@@ -990,6 +1351,7 @@ private fun ButtonGrid(
     reorganizing: Boolean = false,
     onMove: (Int, Int, DropAction) -> Unit = { _, _, _ -> },
     onEdit: (Int) -> Unit = {},
+    onDelete: (Int) -> Unit = {},
 ) {
     var dropPreview by remember { mutableStateOf<DropPreview?>(null) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1006,6 +1368,7 @@ private fun ButtonGrid(
                         onTap = onTap,
                         onMove = onMove,
                         onEdit = onEdit,
+                        onDelete = onDelete,
                         buttons = buttons,
                         dropPreview = dropPreview?.takeIf { it.targetIndex == index },
                         onDropPreview = { dropPreview = it },
@@ -1031,6 +1394,7 @@ private fun ReorderableVocabTile(
     onTap: (VocabButton) -> Unit,
     onMove: (Int, Int, DropAction) -> Unit,
     onEdit: (Int) -> Unit,
+    onDelete: (Int) -> Unit,
     buttons: List<VocabButton>,
     dropPreview: DropPreview?,
     onDropPreview: (DropPreview?) -> Unit,
@@ -1106,6 +1470,7 @@ private fun ReorderableVocabTile(
             },
         onTap = onTap,
         onLongPress = if (reorganizing) ({ onEdit(index) }) else null,
+        onDelete = if (reorganizing) ({ onDelete(index) }) else null,
         dropPreview = dropPreview?.action,
     )
 }
@@ -1117,6 +1482,7 @@ private fun VocabTile(
     modifier: Modifier,
     onTap: (VocabButton) -> Unit,
     onLongPress: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
     dropPreview: DropAction? = null,
 ) {
     val isFolder = button.isCategory || button.boardId != null
@@ -1125,7 +1491,7 @@ private fun VocabTile(
         DropAction.MoveIntoFolder -> Color(0xFF1F9D55)
         DropAction.MoveBefore,
         DropAction.MoveAfter -> Color(0xFF2166F3)
-        null -> if (isFolder) Color(0xFFFFC94D) else Color(button.color)
+        null -> Color(button.color)
     }
     val borderWidth = if (dropPreview != null) 5.dp else 3.dp
     Box(
@@ -1154,11 +1520,11 @@ private fun VocabTile(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(modifier = Modifier.weight(1f))
-            Text(
-                text = button.icon,
-                fontSize = if (button.icon.length > 3) 18.sp else 28.sp,
-                color = Color.Black,
-                maxLines = 1,
+            ButtonVisual(
+                icon = button.icon,
+                imagePath = button.imagePath,
+                modifier = Modifier.size(54.dp),
+                iconFontSize = if (button.icon.length > 3) 18 else 28,
             )
             Spacer(modifier = Modifier.weight(1f))
         }
@@ -1177,6 +1543,20 @@ private fun VocabTile(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+            }
+        }
+        onDelete?.let { delete ->
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .size(30.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFFE05555))
+                    .combinedClickable(onClick = delete),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("×", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, lineHeight = 22.sp)
             }
         }
     }
@@ -1208,7 +1588,7 @@ private fun SuggestionsPanel(result: RecommendationResult, onTap: (VocabButton) 
         result.buttons.forEach { button ->
             val isFolder = button.isCategory || button.boardId != null
             val shape = if (isFolder) FolderShape(cornerRadius = 8.dp) else RoundedCornerShape(8.dp)
-            val borderColor = if (isFolder) Color(0xFFFFC94D) else Color(button.color)
+            val borderColor = Color(button.color)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1236,11 +1616,11 @@ private fun SuggestionsPanel(result: RecommendationResult, onTap: (VocabButton) 
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.weight(1f))
-                    Text(
-                        button.icon,
-                        fontSize = if (button.icon.length > 3) 13.sp else 18.sp,
-                        color = Color.Black,
-                        maxLines = 1,
+                    ButtonVisual(
+                        icon = button.icon,
+                        imagePath = button.imagePath,
+                        modifier = Modifier.size(34.dp),
+                        iconFontSize = if (button.icon.length > 3) 13 else 18,
                     )
                     Spacer(Modifier.weight(1f))
                 }
@@ -1271,16 +1651,41 @@ private fun ActionButton(label: String, icon: String, color: Color, onClick: () 
     }
 }
 
+@Composable
+private fun ButtonVisual(icon: String, imagePath: String?, modifier: Modifier, iconFontSize: Int) {
+    val bitmap = remember(imagePath) {
+        imagePath?.let { path ->
+            runCatching { BitmapFactory.decodeFile(path)?.asImageBitmap() }.getOrNull()
+        }
+    }
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = null,
+            modifier = modifier.clip(RoundedCornerShape(6.dp)),
+            contentScale = ContentScale.Crop,
+        )
+    } else {
+        Text(
+            text = icon,
+            fontSize = iconFontSize.sp,
+            color = Color.Black,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BackspaceButton(onBackspace: () -> Unit, onClear: () -> Unit) {
+private fun BackspaceButton(onBackspace: () -> Unit) {
     Box(
         Modifier
             .width(78.dp)
             .height(70.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(Color(0xFF5D6673))
-            .combinedClickable(onClick = onBackspace, onLongClick = onClear),
+            .combinedClickable(onClick = onBackspace),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1331,6 +1736,10 @@ private fun AdminScreen(
     onRestoreLayout: () -> Unit,
     onRestoreAll: () -> Unit,
     onWipeLearning: () -> Unit,
+    currentProfile: ChildProfile,
+    profiles: List<ChildProfile>,
+    onProfileSelected: (String) -> Unit,
+    onAddProfile: (String) -> Unit,
     voiceOptions: List<VoiceOption>,
     selectedVoiceName: String?,
     speechRate: Float,
@@ -1342,10 +1751,11 @@ private fun AdminScreen(
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
-    val usage = remember { mutableStateMapOf<String, Int>() }
-    LaunchedEffect(usageRefresh) {
-        usage.clear()
-        Store.usageSummary(context).forEach { usage[it.first] = it.second }
+    var insights by remember { mutableStateOf(Store.usageInsights(context)) }
+    var showAddProfile by remember { mutableStateOf(false) }
+    var showPasscodeReset by remember { mutableStateOf(false) }
+    LaunchedEffect(usageRefresh, currentProfile.id) {
+        insights = Store.usageInsights(context)
     }
 
     FullScreenOverlay {
@@ -1362,7 +1772,19 @@ private fun AdminScreen(
                     Button(onClick = onClose) { Text("done") }
                 }
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Column(Modifier.weight(1.45f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(
+                        Modifier
+                            .weight(1.45f)
+                            .fillMaxHeight()
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        ProfileSelector(
+                            currentProfile = currentProfile,
+                            profiles = profiles,
+                            onProfileSelected = onProfileSelected,
+                            onAddProfile = { showAddProfile = true },
+                        )
                         Text("Board editing", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                         Text(
                             "Use reorganize board to return to the communication screen, keep folders navigable, drag words into place, add words, and save with Done.",
@@ -1372,9 +1794,16 @@ private fun AdminScreen(
                         Button(onClick = onEnterReorganize, modifier = Modifier.height(58.dp)) {
                             Text("start reorganizing")
                         }
+                        OutlinedButton(onClick = { showPasscodeReset = true }) { Text("reset passcode") }
                         OutlinedButton(onClick = onWipeLearning) { Text("wipe learned history") }
                     }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
                         VoiceControls(
                             voiceOptions = voiceOptions,
                             selectedVoiceName = selectedVoiceName,
@@ -1383,12 +1812,220 @@ private fun AdminScreen(
                             onSpeechRateChanged = onSpeechRateChanged,
                             onTestVoice = onTestVoice,
                         )
-                        Text("Local usage", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        if (usage.isEmpty()) Text("No words tracked yet.")
-                        usage.forEach { (word, count) ->
-                            Text("$word: $count", fontSize = 17.sp)
+                        UsageDashboard(insights)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAddProfile) {
+        AddProfileDialog(
+            onDismiss = { showAddProfile = false },
+            onAdd = {
+                onAddProfile(it)
+                showAddProfile = false
+            },
+        )
+    }
+
+    if (showPasscodeReset) {
+        PasscodeResetDialog(
+            onDismiss = { showPasscodeReset = false },
+            onSaved = { showPasscodeReset = false },
+        )
+    }
+}
+
+@Composable
+private fun ProfileSelector(
+    currentProfile: ChildProfile,
+    profiles: List<ChildProfile>,
+    onProfileSelected: (String) -> Unit,
+    onAddProfile: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFF4F7F1))) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Profile", fontSize = 14.sp, color = Color(0xFF56616F))
+                Box {
+                    OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(currentProfile.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        profiles.forEach { profile ->
+                            DropdownMenuItem(
+                                text = { Text(profile.name) },
+                                onClick = {
+                                    expanded = false
+                                    onProfileSelected(profile.id)
+                                },
+                            )
                         }
                     }
+                }
+            }
+            Button(onClick = onAddProfile) { Text("add profile") }
+        }
+    }
+}
+
+@Composable
+private fun UsageDashboard(insights: UsageInsights) {
+    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFF2F6FA))) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Usage this month", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White)
+                        .padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("${insights.uniqueWordsThisMonth}", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2166F3))
+                    Text("unique words", fontSize = 13.sp, color = Color(0xFF56616F))
+                }
+                val trendText = when {
+                    insights.uniqueTrend > 0 -> "up ${insights.uniqueTrend} from last month"
+                    insights.uniqueTrend < 0 -> "down ${kotlin.math.abs(insights.uniqueTrend)} from last month"
+                    else -> "same as last month"
+                }
+                Text(trendText, fontSize = 15.sp, color = Color(0xFF56616F), modifier = Modifier.weight(1f))
+            }
+            HorizontalDivider()
+            InsightList("Top words", insights.topWords, emptyText = "No words tracked yet.")
+            HorizontalDivider()
+            InsightList("Top sentences", insights.topSentences, emptyText = "No spoken sentences yet.")
+        }
+    }
+}
+
+@Composable
+private fun InsightList(title: String, rows: List<Pair<String, Int>>, emptyText: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        if (rows.isEmpty()) {
+            Text(emptyText, fontSize = 14.sp, color = Color(0xFF56616F))
+        } else {
+            rows.forEachIndexed { index, (label, count) ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("${index + 1}", fontSize = 13.sp, color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.width(22.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFF56616F)).padding(vertical = 2.dp))
+                    Text(label, fontSize = 15.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("$count", fontSize = 14.sp, color = Color(0xFF56616F))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddProfileDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
+    val keyboard = LocalSoftwareKeyboardController.current
+    var name by remember { mutableStateOf("") }
+    FullScreenOverlay {
+        Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            Column(
+                Modifier
+                    .imePadding()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("Add profile", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(name, { name = it.take(24) }, label = { Text("Child name") })
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = {
+                        keyboard?.hide()
+                        onDismiss()
+                    }) { Text("cancel") }
+                    Button(enabled = name.isNotBlank(), onClick = {
+                        keyboard?.hide()
+                        onAdd(name)
+                    }) { Text("create") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PasscodeResetDialog(onDismiss: () -> Unit, onSaved: () -> Unit) {
+    val context = LocalContext.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    var oldPasscode by remember { mutableStateOf("") }
+    var newPasscode by remember { mutableStateOf("") }
+    var confirmPasscode by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    val canSave = oldPasscode.isNotBlank() && newPasscode.length >= 4 && newPasscode == confirmPasscode
+
+    FullScreenOverlay {
+        Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            Column(
+                Modifier
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("Reset passcode", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(oldPasscode, { oldPasscode = it.filter(Char::isDigit).take(8) }, label = { Text("Old passcode") })
+                OutlinedTextField(newPasscode, { newPasscode = it.filter(Char::isDigit).take(8) }, label = { Text("New passcode") })
+                OutlinedTextField(confirmPasscode, { confirmPasscode = it.filter(Char::isDigit).take(8) }, label = { Text("Confirm new passcode") })
+                error?.let { Text(it, color = Color(0xFFD53B3B), fontSize = 14.sp) }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = {
+                        keyboard?.hide()
+                        onDismiss()
+                    }) { Text("cancel") }
+                    Button(
+                        enabled = canSave,
+                        onClick = {
+                            when {
+                                oldPasscode != Store.passcode(context) -> error = "Old passcode is wrong."
+                                newPasscode == "1234" -> error = "Choose a passcode other than 1234."
+                                else -> {
+                                    Store.savePasscode(context, newPasscode)
+                                    keyboard?.hide()
+                                    onSaved()
+                                }
+                            }
+                        },
+                    ) { Text("save") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfirmDeleteDialog(label: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    FullScreenOverlay {
+        Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            Column(
+                Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("Delete button?", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "Remove \"$label\" from this board?",
+                    fontSize = 17.sp,
+                    color = Color(0xFF56616F),
+                    textAlign = TextAlign.Center,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = onDismiss) { Text("cancel") }
+                    Button(
+                        onClick = onConfirm,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE05555)),
+                    ) { Text("delete") }
                 }
             }
         }
@@ -1406,28 +2043,39 @@ private fun VoiceControls(
 ) {
     val currentIndex = voiceOptions.indexOfFirst { it.name == selectedVoiceName }.takeIf { it >= 0 } ?: 0
     val current = voiceOptions.getOrNull(currentIndex)
+    var expanded by remember { mutableStateOf(false) }
     Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFF2F6FA))) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Voice", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text(current?.label ?: "Default Android English voice", fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box {
                 OutlinedButton(
-                    enabled = voiceOptions.size > 1,
-                    onClick = {
-                        val previous = if (currentIndex <= 0) voiceOptions.lastIndex else currentIndex - 1
-                        voiceOptions.getOrNull(previous)?.let { onVoiceSelected(it.name) }
-                    },
-                ) { Text("prev") }
-                OutlinedButton(
-                    enabled = voiceOptions.size > 1,
-                    onClick = {
-                        val next = if (currentIndex >= voiceOptions.lastIndex) 0 else currentIndex + 1
-                        voiceOptions.getOrNull(next)?.let { onVoiceSelected(it.name) }
-                    },
-                ) { Text("next") }
-                Button(onClick = onTestVoice) { Text("test") }
+                    enabled = voiceOptions.isNotEmpty(),
+                    onClick = { expanded = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        current?.label ?: "Default Android English voice",
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    voiceOptions.forEach { voice ->
+                        DropdownMenuItem(
+                            text = { Text(voice.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            onClick = {
+                                expanded = false
+                                onVoiceSelected(voice.name)
+                            },
+                        )
+                    }
+                }
             }
-            Text("Speed ${(speechRate * 100).toInt()}%", fontSize = 14.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = onTestVoice) { Text("test") }
+                Text("Speed ${(speechRate * 100).toInt()}%", fontSize = 14.sp, color = Color(0xFF56616F))
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { onSpeechRateChanged(speechRate - 0.1f) }) { Text("slower") }
                 OutlinedButton(onClick = { onSpeechRateChanged(speechRate + 0.1f) }) { Text("faster") }
@@ -1442,12 +2090,19 @@ private fun AddButtonDialog(
     onDismiss: () -> Unit,
     onAdd: (VocabButton) -> Unit,
 ) {
+    val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
     var query by remember { mutableStateOf("") }
     var label by remember { mutableStateOf("") }
     var speech by remember { mutableStateOf("") }
     var icon by remember { mutableStateOf("□") }
+    var imagePath by remember { mutableStateOf<String?>(null) }
     var createFolder by remember { mutableStateOf(false) }
+    var buttonColor by remember { mutableStateOf(ButtonPalette.colors.last().value) }
+    var folderAddsToSentence by remember { mutableStateOf(true) }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) imagePath = Store.copyImageToPrivateStorage(context, uri)
+    }
     val allButtons = remember(boards) {
         boards.values.flatten()
             .distinctBy { "${it.label.normalizedId()}|${it.boardId.orEmpty()}|${it.speech}" }
@@ -1496,7 +2151,7 @@ private fun AddButtonDialog(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                Text(button.icon, fontSize = 24.sp, modifier = Modifier.width(40.dp), textAlign = TextAlign.Center)
+                                ButtonVisual(button.icon, button.imagePath, Modifier.size(40.dp), 24)
                                 Column(Modifier.weight(1f)) {
                                     Text(button.label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                                     Text(if (isFolder) "folder" else button.speech, fontSize = 13.sp, color = Color(0xFF56616F), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1520,6 +2175,13 @@ private fun AddButtonDialog(
                 OutlinedTextField(speech, { speech = it.take(32) }, label = { Text("Speech") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(icon, { icon = it.take(4) }, label = { Text("Icon text") }, modifier = Modifier.fillMaxWidth())
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ButtonVisual(icon.ifBlank { "□" }, imagePath, Modifier.size(54.dp), 28)
+                    OutlinedButton(onClick = { imagePicker.launch("image/*") }) { Text("choose image") }
+                    if (imagePath != null) {
+                        OutlinedButton(onClick = { imagePath = null }) { Text("remove") }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(
                         onClick = { createFolder = !createFolder },
                         colors = ButtonDefaults.outlinedButtonColors(containerColor = if (createFolder) Color(0xFFFFF7DA) else Color.Transparent),
@@ -1527,6 +2189,13 @@ private fun AddButtonDialog(
                         Text(if (createFolder) "folder on" else "make folder")
                     }
                     Text("Folders open a new board and can receive dropped buttons.", fontSize = 13.sp, color = Color(0xFF56616F))
+                }
+                ButtonColorPicker(selected = buttonColor, onSelected = { buttonColor = it })
+                if (createFolder) {
+                    FolderSpeakToggle(
+                        enabled = folderAddsToSentence,
+                        onToggle = { folderAddsToSentence = !folderAddsToSentence },
+                    )
                 }
                 Spacer(Modifier.height(4.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -1547,9 +2216,11 @@ private fun AddButtonDialog(
                                     label = cleanLabel,
                                     speech = speech.ifBlank { cleanLabel },
                                     icon = icon.ifBlank { "□" },
-                                    color = if (createFolder) 0xFFFFF3A3 else 0xFFFFFFFF,
+                                    color = buttonColor,
                                     boardId = boardId,
                                     isCategory = boardId != null,
+                                    imagePath = imagePath,
+                                    addToSentence = if (boardId != null) folderAddsToSentence else true,
                                 )
                             )
                         },
@@ -1560,13 +2231,70 @@ private fun AddButtonDialog(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ButtonColorPicker(selected: Long, onSelected: (Long) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Button color", fontSize = 14.sp, color = Color(0xFF56616F))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            ButtonPalette.colors.forEach { option ->
+                val selectedColor = option.value == selected
+                Box(
+                    Modifier
+                        .size(if (selectedColor) 34.dp else 30.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(option.value))
+                        .border(
+                            width = if (selectedColor) 3.dp else 1.dp,
+                            color = if (selectedColor) Color(0xFF1B4DD8) else Color(0x6656616F),
+                            shape = RoundedCornerShape(8.dp),
+                        )
+                        .combinedClickable(onClick = { onSelected(option.value) }),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderSpeakToggle(enabled: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFFF2F6FA))
+            .padding(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Add folder to sentence", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (enabled) "Tapping this folder speaks it and adds it before opening." else "Tapping this folder only opens it.",
+                fontSize = 12.sp,
+                color = Color(0xFF56616F),
+            )
+        }
+        OutlinedButton(onClick = onToggle) {
+            Text(if (enabled) "on" else "off")
+        }
+    }
+}
+
 @Composable
 private fun EditButtonDialog(item: VocabButton, onDismiss: () -> Unit, onSave: (VocabButton) -> Unit) {
+    val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
     var label by remember(item.id) { mutableStateOf(item.label) }
     var speech by remember(item.id) { mutableStateOf(item.speech) }
     var icon by remember(item.id) { mutableStateOf(item.icon) }
+    var imagePath by remember(item.id) { mutableStateOf(item.imagePath) }
     var folderPath by remember(item.id) { mutableStateOf(item.boardId.orEmpty()) }
+    var buttonColor by remember(item.id) { mutableStateOf(item.color) }
+    var addToSentence by remember(item.id) { mutableStateOf(item.addToSentence) }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) imagePath = Store.copyImageToPrivateStorage(context, uri)
+    }
 
     FullScreenOverlay {
         Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
@@ -1585,8 +2313,25 @@ private fun EditButtonDialog(item: VocabButton, onDismiss: () -> Unit, onSave: (
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(icon, { icon = it.take(4) }, label = { Text("Icon text") })
                 Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ButtonVisual(icon.ifBlank { "□" }, imagePath, Modifier.size(58.dp), 28)
+                    OutlinedButton(onClick = { imagePicker.launch("image/*") }) { Text("choose image") }
+                    if (imagePath != null) {
+                        OutlinedButton(onClick = { imagePath = null }) { Text("remove") }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(folderPath, { folderPath = it.lowercase(Locale.ROOT).filter { char -> char.isLetterOrDigit() || char == '_' }.take(20) }, label = { Text("Folder path, blank for normal word") })
                 Text("Examples: want, need, food, drink, toilet, people, places, play, feel, body, things", fontSize = 12.sp, color = Color(0xFF56616F), textAlign = TextAlign.Center)
+                Spacer(Modifier.height(8.dp))
+                ButtonColorPicker(selected = buttonColor, onSelected = { buttonColor = it })
+                if (folderPath.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    FolderSpeakToggle(
+                        enabled = addToSentence,
+                        onToggle = { addToSentence = !addToSentence },
+                    )
+                }
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(onClick = {
@@ -1601,8 +2346,11 @@ private fun EditButtonDialog(item: VocabButton, onDismiss: () -> Unit, onSave: (
                                 label = label.ifBlank { item.label },
                                 speech = speech.ifBlank { label },
                                 icon = icon.ifBlank { "□" },
+                                color = buttonColor,
                                 boardId = normalizedPath,
                                 isCategory = normalizedPath != null,
+                                imagePath = imagePath,
+                                addToSentence = if (normalizedPath != null) addToSentence else true,
                             )
                         )
                     }) { Text("save") }

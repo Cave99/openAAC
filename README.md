@@ -42,11 +42,15 @@ The MVP should include:
 - 4x5 communication grid.
 - Fixed bottom pinned-word strip.
 - Top sentence bar with icons and text.
-- Speak sentence, backspace, long-press clear, and `?`/`hmm` controls.
+- Speak/stop, backspace, and clear controls.
+- Tap-to-remove sentence bar words.
 - Local quick recommendations that start rule-based and learn from repeated word sequences.
+- Multiple local child profiles.
 - Configurable vocabulary packs.
-- Custom words and images.
+- Custom words, folders, button colors, and gallery images.
+- Folder buttons can be set to navigate only without speaking or adding to the sentence.
 - Local usage tracking and admin insights.
+- Admin passcode reset.
 - Restore default layout and restore all defaults.
 
 ## License Status
