@@ -94,6 +94,7 @@ private object Store {
     private const val KEY_HOME = "home_buttons"
     private const val KEY_SENTENCES = "sentence_history"
     private const val KEY_COUNTS = "usage_counts"
+    private const val KEY_TRANSITIONS = "transition_counts"
     private const val THIRTY_DAYS_MS = 30L * 24L * 60L * 60L * 1000L
 
     fun isSetup(context: Context): Boolean =
@@ -136,6 +137,7 @@ private object Store {
             .remove(KEY_HOME)
             .remove(KEY_SENTENCES)
             .remove(KEY_COUNTS)
+            .remove(KEY_TRANSITIONS)
             .apply()
     }
 
@@ -143,6 +145,14 @@ private object Store {
         val counts = JSONObject(prefs(context).getString(KEY_COUNTS, "{}") ?: "{}")
         counts.put(label, counts.optInt(label, 0) + 1)
         prefs(context).edit().putString(KEY_COUNTS, counts.toString()).apply()
+    }
+
+    fun trackTransition(context: Context, previous: String?, next: String) {
+        if (previous.isNullOrBlank() || next.isBlank()) return
+        val transitions = JSONObject(prefs(context).getString(KEY_TRANSITIONS, "{}") ?: "{}")
+        val key = transitionKey(previous, next)
+        transitions.put(key, transitions.optInt(key, 0) + 1)
+        prefs(context).edit().putString(KEY_TRANSITIONS, transitions.toString()).apply()
     }
 
     fun trackSentence(context: Context, spoken: String) {
@@ -167,7 +177,91 @@ private object Store {
             .toList()
     }
 
+    fun recommendations(
+        context: Context,
+        lastWord: String?,
+        currentBoard: String?,
+        visibleButtons: List<VocabButton>,
+        homeButtons: List<VocabButton>,
+    ): RecommendationResult {
+        val allButtons = (homeButtons + Defaults.pinned + Defaults.boards.values.flatten())
+            .distinctBy { it.label.normalized() }
+            .associateBy { it.label.normalized() }
+
+        val counts = JSONObject(prefs(context).getString(KEY_COUNTS, "{}") ?: "{}")
+        val transitions = JSONObject(prefs(context).getString(KEY_TRANSITIONS, "{}") ?: "{}")
+        val scores = linkedMapOf<String, RecommendationScore>()
+
+        if (!lastWord.isNullOrBlank()) {
+            val from = lastWord.normalized()
+            transitions.keys().asSequence()
+                .mapNotNull { key ->
+                    val split = key.split(">")
+                    if (split.size == 2 && split[0] == from) split[1] to transitions.optInt(key) else null
+                }
+                .sortedByDescending { it.second }
+                .forEach { (word, count) ->
+                    allButtons[word]?.let { button ->
+                        scores[button.label.normalized()] = RecommendationScore(button, count * 10 + 50, "frequent after $lastWord")
+                    }
+                }
+        }
+
+        ruleFallback(lastWord, currentBoard).forEachIndexed { index, label ->
+            allButtons[label.normalized()]?.let { button ->
+                scores.putIfAbsent(button.label.normalized(), RecommendationScore(button, 40 - index, "common path"))
+            }
+        }
+
+        visibleButtons.take(5).forEachIndexed { index, button ->
+            scores.putIfAbsent(button.label.normalized(), RecommendationScore(button, 25 - index, "on this board"))
+        }
+
+        counts.keys().asSequence()
+            .mapNotNull { key -> allButtons[key.normalized()]?.let { RecommendationScore(it, counts.optInt(key), "frequently used") } }
+            .sortedByDescending { it.score }
+            .forEach { scores.putIfAbsent(it.button.label.normalized(), it.copy(score = it.score + 10)) }
+
+        val recommendations = scores.values
+            .sortedByDescending { it.score }
+            .take(5)
+            .map { it.button }
+
+        val totalTaps = counts.keys().asSequence().sumOf { counts.optInt(it) }
+        val totalTransitions = transitions.keys().asSequence().sumOf { transitions.optInt(it) }
+        val status = when {
+            totalTransitions >= 40 -> "learning from regular use"
+            totalTransitions >= 12 -> "starting to personalize"
+            totalTaps >= 8 -> "collecting patterns"
+            else -> "starter suggestions"
+        }
+        return RecommendationResult(recommendations, status)
+    }
+
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    private fun transitionKey(previous: String, next: String) = "${previous.normalized()}>${next.normalized()}"
+
+    private fun String.normalized() = lowercase(Locale.ROOT).trim()
+
+    private fun ruleFallback(lastWord: String?, currentBoard: String?): List<String> {
+        return when (lastWord?.normalized()) {
+            "i" -> listOf("want", "need", "go", "feel", "like")
+            "you" -> listOf("want", "need", "go", "help", "stop")
+            "want" -> listOf("food", "drink", "toilet", "play", "help")
+            "need" -> listOf("toilet", "help", "drink", "food", "rest")
+            "go" -> listOf("home", "school", "toilet", "outside", "shops")
+            "food" -> listOf("apple", "banana", "bread", "snack", "finished")
+            "drink" -> listOf("water", "juice", "milk", "cup", "finished")
+            "feel" -> listOf("happy", "sad", "sick", "tired", "angry")
+            else -> when (currentBoard) {
+                "want" -> listOf("food", "drink", "toilet", "play", "help")
+                "need" -> listOf("toilet", "help", "drink", "food", "rest")
+                "go" -> listOf("home", "school", "toilet", "outside", "shops")
+                else -> listOf("I", "want", "need", "toilet", "help")
+            }
+        }
+    }
 
     private fun VocabButton.toJson() = JSONObject()
         .put("id", id)
@@ -188,6 +282,17 @@ private object Store {
         isCategory = optBoolean("isCategory", false),
     )
 }
+
+private data class RecommendationScore(
+    val button: VocabButton,
+    val score: Int,
+    val reason: String,
+)
+
+private data class RecommendationResult(
+    val buttons: List<VocabButton>,
+    val status: String,
+)
 
 private object Defaults {
     val pinned = listOf(
@@ -308,6 +413,13 @@ private fun SetupScreen(onComplete: (String) -> Unit) {
             fontSize = 20.sp,
             textAlign = TextAlign.Center,
         )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Recommendations start with simple paths. They usually become useful after a few repeated phrases, and noticeably better after a week or two of regular use.",
+            fontSize = 17.sp,
+            textAlign = TextAlign.Center,
+            color = Color(0xFF56616F),
+        )
         Spacer(Modifier.height(24.dp))
         Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
             Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -334,9 +446,29 @@ private fun CommunicatorScreen(speak: (String) -> Unit) {
     var homeButtons by remember { mutableStateOf(Store.homeButtons(context)) }
     var showAdminLogin by remember { mutableStateOf(false) }
     var showAdmin by remember { mutableStateOf(false) }
+    var recommendationRefresh by remember { mutableStateOf(0) }
 
     val currentBoard = boardStack.lastOrNull()
     val buttons = currentBoard?.let { Defaults.boards[it] } ?: homeButtons
+    val recommendationResult = remember(currentBoard, homeButtons, sentence.size, recommendationRefresh) {
+        Store.recommendations(
+            context = context,
+            lastWord = sentence.lastOrNull()?.label,
+            currentBoard = currentBoard,
+            visibleButtons = buttons,
+            homeButtons = homeButtons,
+        )
+    }
+
+    fun selectButton(button: VocabButton) {
+        val previous = sentence.lastOrNull()?.label
+        sentence.add(SentenceToken(button.label, button.speech, button.icon))
+        speak(button.speech)
+        Store.trackWord(context, button.label)
+        Store.trackTransition(context, previous, button.label)
+        recommendationRefresh++
+        button.boardId?.let { boardStack.add(it) }
+    }
 
     Row(Modifier.fillMaxSize().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -368,23 +500,17 @@ private fun CommunicatorScreen(speak: (String) -> Unit) {
                 ButtonGrid(
                     buttons = buttons,
                     modifier = Modifier.weight(1f),
-                    onTap = { button ->
-                        sentence.add(SentenceToken(button.label, button.speech, button.icon))
-                        speak(button.speech)
-                        Store.trackWord(context, button.label)
-                        button.boardId?.let { boardStack.add(it) }
-                    },
+                    onTap = ::selectButton,
                 )
 
-                SuggestionsPanel(currentBoard = currentBoard)
+                SuggestionsPanel(
+                    result = recommendationResult,
+                    onTap = ::selectButton,
+                )
             }
 
             PinnedStrip(
-                onTap = { button ->
-                    sentence.add(SentenceToken(button.label, button.speech, button.icon))
-                    speak(button.speech)
-                    Store.trackWord(context, button.label)
-                },
+                onTap = ::selectButton,
             )
         }
     }
@@ -521,14 +647,7 @@ private fun PinnedStrip(onTap: (VocabButton) -> Unit) {
 }
 
 @Composable
-private fun SuggestionsPanel(currentBoard: String?) {
-    val suggestions = when (currentBoard) {
-        "i" -> listOf("want", "need", "go")
-        "want" -> listOf("food", "drink", "toilet")
-        "need" -> listOf("help", "toilet", "drink")
-        "go" -> listOf("home", "school", "toilet")
-        else -> listOf("I", "want", "need")
-    }
+private fun SuggestionsPanel(result: RecommendationResult, onTap: (VocabButton) -> Unit) {
     Column(
         Modifier
             .width(138.dp)
@@ -539,17 +658,20 @@ private fun SuggestionsPanel(currentBoard: String?) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("quick", fontWeight = FontWeight.Bold, color = Color(0xFF56616F))
-        suggestions.forEach {
-            Box(
-                Modifier
+        Text(result.status, fontSize = 11.sp, color = Color(0xFF56616F), lineHeight = 12.sp)
+        result.buttons.forEach { button ->
+            Button(
+                onClick = { onTap(button) },
+                modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.White)
-                    .padding(6.dp),
-                contentAlignment = Alignment.Center,
+                    .weight(1f),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
             ) {
-                Text(it, fontSize = 18.sp, textAlign = TextAlign.Center)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(button.icon, fontSize = if (button.icon.length > 3) 13.sp else 20.sp, color = Color.Black, maxLines = 1)
+                    Text(button.label, fontSize = 15.sp, color = Color.Black, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }
