@@ -21,7 +21,8 @@ openAAC should be Android first and tablet first.
 The app should be designed for:
 
 - Android tablets.
-- Landscape orientation as the primary layout.
+- Locked landscape orientation.
+- A 12-inch tablet as the first design target.
 - APK side-loading during early development.
 - Eventual Google Play release.
 
@@ -123,7 +124,7 @@ Use a simple layered architecture:
 - ViewModel layer: state, events, and screen logic.
 - Domain layer: vocabulary selection, board navigation, sentence building, recommendation rules.
 - Data layer: Room database, local image storage, settings storage.
-- Platform layer: Android TextToSpeech, image picker, camera capture.
+- Platform layer: Android TextToSpeech, image picker, camera capture, image cropper.
 
 Avoid over-abstracting early. Create boundaries where they protect important decisions:
 
@@ -131,6 +132,7 @@ Avoid over-abstracting early. Create boundaries where they protect important dec
 - TTS should be behind a small interface.
 - Recommendation logic should be testable outside UI.
 - Vocabulary models should not depend on Compose.
+- Sentence-building logic should be separate from board-navigation logic.
 
 ## Local Data
 
@@ -144,6 +146,8 @@ Storage should include:
 
 No remote database should be used.
 
+The app should not request Android internet permission. This should be validated in code review before every release.
+
 ## Suggested Data Model
 
 Initial entities:
@@ -155,6 +159,7 @@ Initial entities:
 - `IconAsset`
 - `NavigationRule`
 - `UsageEvent`
+- `SentenceSession`
 - `AppSettings`
 
 ## VocabularyItem
@@ -170,8 +175,12 @@ Fields may include:
 - color
 - packId
 - isPinned
+- opensBoardId
+- isCategory
 - createdAt
 - updatedAt
+
+Every first-version button should represent a single word. Category-style buttons can speak and add that word to the sentence, then navigate to the next board.
 
 ## VocabularyPack
 
@@ -186,6 +195,8 @@ Fields may include:
 - createdAt
 - updatedAt
 
+Vocab packs are enabled or disabled globally. Enabled packs populate their words into matching categories and can introduce a new home-board category/folder when needed.
+
 ## Board
 
 Represents a visible grid or path.
@@ -196,6 +207,7 @@ Fields may include:
 - name
 - parentBoardId
 - type
+- sourceVocabularyItemId
 - createdAt
 - updatedAt
 
@@ -212,6 +224,8 @@ Fields may include:
 - column
 - colorOverride
 
+Button colors should be resolved from category defaults unless `colorOverride` is set.
+
 ## IconAsset
 
 Represents an icon or user image.
@@ -223,7 +237,12 @@ Fields may include:
 - localPath
 - attribution
 - license
+- cropX
+- cropY
+- cropScale
 - createdAt
+
+Custom images should be copied into app-controlled local storage and cropped/positioned into a square thumbnail for grid display.
 
 ## NavigationRule
 
@@ -248,9 +267,25 @@ Fields may include:
 - vocabularyItemId
 - sentenceSessionId
 - positionInSentence
+- sourceMode
 - spokenAt
 
 These events can power local summaries and future recommendation behavior.
+
+## SentenceSession
+
+Represents a locally stored spoken sentence.
+
+Fields may include:
+
+- id
+- spokenText
+- isQuestion
+- sourceMode
+- startedAt
+- spokenAt
+
+`sourceMode` should distinguish normal child use from carer modeling mode so modeled language does not distort child usage insights.
 
 ## Voice And TTS
 
@@ -262,6 +297,7 @@ The app should expose global settings for:
 - Pitch.
 - Speech rate.
 - Volume if supported.
+- Australian English preference where available.
 
 Important technical requirement:
 
@@ -295,11 +331,14 @@ Admin mode should be protected by a simple local passcode.
 The first version can use:
 
 - A numeric passcode.
+- Default passcode `1234` on first install.
 - Stored locally.
 - Hashed before storage.
 - Reset behavior documented carefully.
 
 The goal is not high-security authentication. The goal is to prevent accidental child edits.
+
+If the passcode is forgotten, the intended recovery path is reinstalling the app to reset the passcode while preserving local vocabulary and images if the platform allows. This needs Android validation because uninstall behavior can remove app-local data unless backup/preservation is deliberately supported.
 
 ## Usage Insights
 
@@ -310,7 +349,11 @@ Track:
 - Word taps.
 - Sentence speaks.
 - Word order in sentences.
+- Full spoken sentence sessions.
+- Question marker use.
+- Board navigation paths.
 - Time of use.
+- Source mode: child use or modeling mode.
 
 Expose in admin mode:
 
@@ -319,8 +362,11 @@ Expose in admin mode:
 - Top words this year.
 - Unique words used.
 - Common word pairs or paths.
+- Common full sentence patterns.
 
 Do not send usage data off device.
+
+Usage tracking should be enabled by default because it supports the future local intelligence layer. The first-time setup flow should explain this clearly.
 
 ## Recommendation Layer
 
@@ -341,6 +387,8 @@ The recommendation system should remain:
 - Optional.
 - Non-blocking.
 
+The first implementation should support a side suggestion panel while the main board navigates into the active word/category path.
+
 ## Permissions
 
 Initial expected Android permissions:
@@ -355,6 +403,8 @@ Avoid:
 - Account permissions.
 - Location permissions.
 
+The Android manifest should intentionally omit `android.permission.INTERNET`.
+
 If a future feature requires a new permission, it should be documented and treated as a major product decision.
 
 ## Testing Strategy
@@ -365,9 +415,11 @@ Unit tests:
 
 - Sentence building.
 - Delete and clear behavior.
+- Question marker behavior.
 - Navigation rules.
 - Recommendation rules.
 - Usage summaries.
+- Modeling mode separation.
 - Vocabulary pack enable/disable behavior.
 
 UI tests:
@@ -377,14 +429,20 @@ UI tests:
 - A user can tap words and speak a sentence.
 - Back and home navigation work.
 - Pinned words remain available.
+- Backspace deletes words while navigation back changes only the board path.
+- Long-press backspace clears the sentence.
+- Home resets the board path without clearing the sentence.
+- Question marker is visible in the sentence bar.
 
 Manual device testing:
 
-- Android tablet landscape layout.
+- Android 12-inch tablet landscape layout.
 - Local TTS works offline.
 - Camera image import works.
 - Gallery image import works.
+- Image crop/position flow works.
 - Text fits in grid buttons.
+- The installed app works without internet permission.
 
 ## Release Strategy
 
@@ -420,6 +478,19 @@ Recommended setup:
 - Keep issue tracking simple.
 - Avoid heavy contribution process unless the project grows.
 
+GitHub personal repositories cannot restrict protected-branch pushes to a named user in the same way organization repositories can. Practical control is handled by keeping collaborator access limited, protecting branches, and disabling force pushes and branch deletion.
+
+## Licensing
+
+The desired licensing model is not a standard OSI open-source model because it should block commercial resale and paid product reuse without written permission.
+
+Recommended direction:
+
+- Use public-source/source-available wording until the license is finalized.
+- Consider PolyForm Noncommercial or a similar non-commercial software license.
+- Do not add a final `LICENSE` file until the owner confirms the non-commercial tradeoff.
+- Keep third-party icon and asset licenses compatible with non-commercial distribution and clearly attributed.
+
 ## Development Rules
 
 Technical decisions should preserve the product ideology:
@@ -431,6 +502,7 @@ Technical decisions should preserve the product ideology:
 - No paid feature flags.
 - No network-hosted vocabulary.
 - No database outside the device.
+- No Android internet permission.
+- No commercial reuse license without explicit owner approval.
 
 If a proposed feature conflicts with local-only trust, it should be rejected or redesigned.
-

@@ -7,13 +7,14 @@ This document tracks future features, research topics, and ideas to revisit. Ite
 Future features must not compromise the core ideology:
 
 - Free forever.
-- Open source.
+- Public source, with the final license still to be confirmed.
 - Local only.
 - No sign in.
 - No cloud database.
 - No paid features.
 - No paid icon packs.
 - No external analytics.
+- No internet permission unless the project owner makes an explicit major direction change.
 
 ## Near-Term Improvements
 
@@ -32,6 +33,8 @@ Possible sources:
 Example:
 
 If the user often says "I want apple", then after tapping "I" and "want", "apple" should appear quickly without navigating through food categories.
+
+The first implementation should keep the main board path-based while showing suggestions in a side panel.
 
 ## Frequency-Based Suggestions
 
@@ -63,6 +66,8 @@ Ideas:
 
 This is not external analytics. It is a local support tool for carers.
 
+Usage data should distinguish normal child use from carer modeling mode.
+
 ## Phrase Shortcuts
 
 Allow carers to create reusable phrases.
@@ -79,6 +84,8 @@ Questions to resolve:
 - Should phrase buttons speak immediately?
 - Should phrase buttons add multiple words to the sentence bar?
 - Should phrases be shown differently from single words?
+
+Phrase buttons are not part of the first version. First-version buttons should represent single words.
 
 ## Layout Options
 
@@ -103,6 +110,25 @@ Potential use cases:
 - Therapy settings.
 
 This is not needed for the first version.
+
+## Switch And Scanning Access
+
+Investigate support for users who cannot reliably tap buttons.
+
+Switch/scanning access means the app can move focus through buttons automatically or step-by-step, and the user selects an item with one or more external switches or accessible controls instead of directly tapping the screen.
+
+Potential users:
+
+- Children with motor differences.
+- Users who cannot accurately touch a tablet grid.
+- Users who use external accessibility switches.
+
+Questions:
+
+- Should scanning move row-by-row, button-by-button, or by groups?
+- Should the app support Android accessibility services first?
+- How should scanning work with the sentence bar and pinned strip?
+- What visual focus indicator is clear enough for AAC use?
 
 ## Local Backup And Restore
 
@@ -322,6 +348,7 @@ These should remain out of scope unless the core ideology changes, which it shou
 - Advertising.
 - External analytics.
 - Required internet connection.
+- Android internet permission.
 - Cloud AI recommendations.
 - Social features.
 
@@ -329,10 +356,6 @@ These should remain out of scope unless the core ideology changes, which it shou
 
 - Is Android built-in local TTS good enough for the first release?
 - What default vocabulary size is useful without overwhelming the child?
-- Should pinned words live in the grid or in a separate strip?
-- How should the quick access panel fit beside a 4x5 tablet board?
-- Should tapping a category word also speak it, or only navigate?
-- Should phrase shortcuts be treated as words or sentence templates?
 - What backup format is easiest for non-technical carers?
 - What icon style is clearest for the target users?
-
+- Which non-commercial source-available license best matches the project goals?
