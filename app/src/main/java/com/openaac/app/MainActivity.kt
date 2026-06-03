@@ -452,11 +452,7 @@ private fun SentenceBar(
             }
         }
         ActionButton("speak", "▶", Color(0xFF2166F3), onSpeak)
-        Box(
-            Modifier.combinedClickable(onClick = onBackspace, onLongClick = onClear)
-        ) {
-            ActionButton("delete", "⌫", Color(0xFF5D6673), {})
-        }
+        BackspaceButton(onBackspace = onBackspace, onClear = onClear)
         ActionButton("hmm", "?", Color(0xFFFFD36E), onQuestion)
         OutlinedButton(onClick = onAdmin, modifier = Modifier.height(70.dp)) {
             Text("admin", fontSize = 15.sp)
@@ -577,6 +573,25 @@ private fun ActionButton(label: String, icon: String, color: Color, onClick: () 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(icon, fontSize = 24.sp, color = Color.White)
             Text(label, fontSize = 11.sp, color = Color.White, maxLines = 1)
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BackspaceButton(onBackspace: () -> Unit, onClear: () -> Unit) {
+    Box(
+        Modifier
+            .width(78.dp)
+            .height(70.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF5D6673))
+            .combinedClickable(onClick = onBackspace, onLongClick = onClear),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("⌫", fontSize = 24.sp, color = Color.White)
+            Text("delete", fontSize = 11.sp, color = Color.White, maxLines = 1)
         }
     }
 }
