@@ -6,7 +6,7 @@ The goal is to make a practical communication app for non-speaking autistic chil
 
 ## Current Status
 
-This repository is in product planning.
+This repository now contains the first Android prototype.
 
 Planning docs:
 
@@ -31,7 +31,7 @@ Planning docs:
 
 ## MVP Direction
 
-The first version is planned as a native Android app using Kotlin, Jetpack Compose, Room, local files, and Android local TextToSpeech.
+The first prototype is a native Android app using Kotlin, Jetpack Compose, SharedPreferences local storage, and Android local TextToSpeech. Room is still the intended next storage step once the prototype behavior is proven.
 
 The MVP should include:
 
@@ -55,3 +55,26 @@ OpenAAC is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
 People should be able to inspect, use, and customize OpenAAC for free, but selling it, bundling it into a paid product, or using the code in a commercial AAC product requires explicit written permission from the project owner.
 
 That goal is different from standard OSI open source, because OSI-approved open-source licenses allow commercial use. Do not assume commercial reuse is permitted.
+
+## Build
+
+This project uses the checked-in Gradle wrapper.
+
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
+./gradlew assembleDebug
+```
+
+The debug APK is written to:
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
+
+Install on a connected Android tablet with:
+
+```bash
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
