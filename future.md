@@ -7,7 +7,7 @@ This document tracks future features, research topics, and ideas to revisit. Ite
 Future features must not compromise the core ideology:
 
 - Free forever.
-- Public source, with the final license still to be confirmed.
+- Public source under the PolyForm Noncommercial License 1.0.0.
 - Local only.
 - No sign in.
 - No cloud database.
@@ -115,6 +115,8 @@ This is not needed for the first version.
 
 Investigate support for users who cannot reliably tap buttons.
 
+This is not a first-version focus, but it is worth keeping as a later accessibility investigation.
+
 Switch/scanning access means the app can move focus through buttons automatically or step-by-step, and the user selects an item with one or more external switches or accessible controls instead of directly tapping the screen.
 
 Potential users:
@@ -133,6 +135,8 @@ Questions:
 ## Local Backup And Restore
 
 Support exporting and importing local configuration files.
+
+This comes after the core communication MVP. The first prototype should prioritize communication, editing, speech, backspace behavior, and tracking.
 
 Possible formats:
 
@@ -358,4 +362,3 @@ These should remain out of scope unless the core ideology changes, which it shou
 - What default vocabulary size is useful without overwhelming the child?
 - What backup format is easiest for non-technical carers?
 - What icon style is clearest for the target users?
-- Which non-commercial source-available license best matches the project goals?

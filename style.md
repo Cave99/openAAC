@@ -24,7 +24,7 @@ The first version should use:
 
 - A top sentence bar that fills the upper area of the screen.
 - A primary communication grid.
-- A fixed pinned-word strip separate from the main grid.
+- A fixed pinned-word strip at the bottom of the screen, separate from the main grid.
 - Home and back controls.
 - Backspace, speak, and question controls inside the sentence bar.
 - A side suggestions panel where useful.
@@ -45,7 +45,7 @@ The sentence bar should include:
 - Speak full sentence.
 - Backspace one word.
 - Long-press backspace to clear the sentence.
-- Question mark action to indicate the message is a question.
+- Question mark action that displays `?` and speaks `hmm`.
 
 ## Button Anatomy
 
@@ -61,6 +61,8 @@ Text should always be visible. Even when the child does not read, text helps car
 Buttons should be large, stable, and evenly spaced. They should not resize based on label length. Long labels should wrap cleanly or use a smaller text size within a defined limit.
 
 Category-style buttons should look like communication buttons first and folders second. The user is still saying the word when tapping it; the folder/path behavior is an extra result of that tap.
+
+Category-style buttons should include a small folder marker.
 
 ## Tap Targets
 
@@ -113,6 +115,8 @@ The following words should always be easy to access:
 These should have stable placement and strong visual distinction. They should not move around during normal navigation.
 
 Pinned words should not consume cells in the main 4x5 board.
+
+Pinned words should speak immediately and add to the sentence bar when tapped.
 
 ## Color System
 
@@ -179,8 +183,10 @@ The app should allow mixed icon sources because usefulness matters more than per
 
 Image rules:
 
+- Prefer simple cartoon-like symbols.
 - Avoid dark, low-contrast images for default icons.
 - Avoid overly detailed images where the meaning is unclear at small sizes.
+- Avoid facial expression icons except for very clear happy and sad icons.
 - Prefer centered subjects.
 - Prefer transparent or plain backgrounds when possible.
 - User photos are acceptable for personalized words.
@@ -209,14 +215,17 @@ It should:
 
 - Require an admin passcode.
 - Use `1234` as the default first-install passcode.
+- Force the default passcode to be changed during first-time setup.
+- Require the passcode every time admin mode is opened.
 - Show edit controls.
 - Allow drag and drop.
 - Allow button editing.
 - Allow vocabulary pack management.
 - Allow local usage review.
-- Provide reset and backup actions.
+- Provide reset and restore actions.
+- Provide restore default layout and restore all defaults actions.
 - Include a dedicated layout editor instead of editing the live child board directly.
-- Include modeling mode so carers can demonstrate language without polluting the child's usage analytics.
+- Include a modeling mode switch so carers can demonstrate language without polluting the child's usage analytics.
 
 Admin mode can be denser than child mode, but it should remain simple and calm.
 
@@ -252,9 +261,9 @@ When home is tapped:
 
 When question mark is tapped:
 
-- The sentence is marked as a question.
-- The visual sentence bar should clearly show that question state.
-- Speech output should include or respect the question marker where the TTS engine supports it.
+- The sentence bar shows a visible `?` marker.
+- The app speaks `hmm`.
+- The app should not rely on TTS question inflection.
 
 ## Accessibility
 

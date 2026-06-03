@@ -6,10 +6,12 @@ openAAC is a free, public-source AAC application for Android tablets. It is prim
 
 AAC should not be locked behind expensive apps, paid icon packs, subscriptions, accounts, or cloud services. openAAC exists to give families and carers a practical, local-first communication tool that can be customized to the child without ongoing cost.
 
+The app launcher name should be `OpenAAC`. Inside the app, branding should be minimal because the product is a communication tool, not a marketing surface.
+
 ## Core Ideology
 
 - Free forever.
-- Public source, with the license decision still to be finalized.
+- Public source under the PolyForm Noncommercial License 1.0.0.
 - Android tablet first.
 - Local only by default and by design.
 - No sign in, no sign up, no cloud database, no hosted user data.
@@ -59,8 +61,9 @@ The setup flow should:
 
 - Explain that openAAC is local-only.
 - Explain that no vocabulary, images, sentences, or usage data leave the tablet.
-- Confirm the default admin passcode.
-- Allow the carer to change the admin passcode if they want.
+- Avoid asking for the child's name or other personal identity details.
+- Explain the temporary default admin passcode of `1234`.
+- Force the carer to change the admin passcode before setup is complete.
 - Confirm local usage tracking is enabled.
 - Confirm voice settings, preferring Australian English where available.
 - Explain that the app does not use the internet.
@@ -133,6 +136,8 @@ These should remain visually stable and should not disappear when the user chang
 
 Pinned words should live in a separate fixed strip rather than consuming cells in the main 4x5 board.
 
+The first layout should place the pinned strip at the bottom of the screen. Pinned words should speak immediately and add to the sentence bar when tapped.
+
 ### 5. Customizable From Day One
 
 Custom vocabulary is not a future enhancement. It is core to the product.
@@ -160,10 +165,12 @@ From the first usable version, carers should be able to:
 - Backspace button in the sentence bar to delete the last word.
 - Long-press backspace clears the full sentence.
 - Question mark button in the sentence bar to mark the message as a question.
+- Question marker should display as `?`, speak `hmm` when tapped, and avoid trying to change TTS inflection.
 - Home button.
 - Navigation back button that only moves back through board history and is disabled when no back path exists.
 - Pinned urgent/common words.
 - Fixed pinned-word strip outside the 4x5 grid.
+- Pinned words should live at the bottom of the screen.
 - Visual-first buttons with text labels.
 - Fast navigation through common sentence paths.
 - Tapping a word speaks it, adds it to the sentence bar, and moves into that word's next board/category where one exists.
@@ -173,6 +180,8 @@ From the first usable version, carers should be able to:
 
 - Protected by an admin passcode.
 - Default admin passcode is `1234`.
+- First-time setup must force the admin passcode to be changed away from `1234`.
+- Admin mode requires passcode entry every time.
 - Edit vocabulary.
 - Add new words.
 - Add custom images from gallery.
@@ -185,8 +194,11 @@ From the first usable version, carers should be able to:
 - Manage vocabulary packs.
 - View local usage summaries.
 - Reset layout to default if needed.
+- Restore all defaults if needed.
 
 Admin mode should be hidden behind a settings/admin screen rather than being visible in child mode.
+
+Modeling mode should be a switch inside admin mode.
 
 ## Vocabulary Packs
 
@@ -207,6 +219,29 @@ The default vocabulary should avoid highly specific fringe words such as Minecra
 
 Words should not have a hidden state in the first version. If a carer does not want a word available, they should delete it or disable the pack that supplied it.
 
+Admins should be able to delete default words and move/edit words from enabled packs. Settings must include restore default layout and restore all defaults from day one.
+
+## Proposed Default Home Board
+
+The first 4x5 home board should prioritize sentence starters and practical communication paths. This is a starting point to test and iterate.
+
+| Row | Button 1 | Button 2 | Button 3 | Button 4 | Button 5 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | I | you | want | need | go |
+| 2 | food | drink | toilet | people | places |
+| 3 | home | school | play | feel | body |
+| 4 | like | don't | have | things | finished |
+
+Pinned bottom strip:
+
+- yes
+- no
+- more
+- help
+- stop
+
+Category-style buttons should still speak and add their word to the sentence bar. They should also show a small folder marker so carers can see that they open a board/path.
+
 ## Icon Strategy
 
 openAAC should support a mix of:
@@ -221,6 +256,8 @@ The target visual style should be consistent, but the product should not block u
 Words should support multiple icon options so carers can choose the image that best matches the child.
 
 Custom images should be cropped to a square, with the carer able to position and crop the image during import.
+
+Default icons should be simple, cartoon-like, and symbolic. Facial expression icons should be avoided except for very clear happy and sad icons.
 
 ## Voice And Speech
 
@@ -252,6 +289,8 @@ Examples:
 
 This data must stay on the device. It should never be uploaded, sold, synced, or used for external analytics.
 
+Exact spoken sentence history should expire after about 30 days. Aggregate statistics and sequence summaries can be kept longer.
+
 Usage tracking should be enabled by default. Admin mode should include a modeling mode so carers can use the app to demonstrate communication without mixing their own modeled language into the child's usage analytics.
 
 ## MVP Scope
@@ -264,13 +303,16 @@ The first meaningful MVP should include:
 - Child communication mode.
 - Admin/edit mode with passcode.
 - Default admin passcode of `1234`.
+- Forced admin passcode change during setup.
 - 4x5 board layout.
+- Proposed default 20-button home board.
 - Separate fixed strip for pinned words.
 - Sentence bar with icons and text.
 - Tap-to-speak word behavior.
 - Speak sentence button.
 - Backspace last word and long-press backspace to clear sentence.
 - Question mark sentence action.
+- Question action displays `?` and speaks `hmm`.
 - Pinned words: yes, no, more, help, stop.
 - Basic category and sentence-flow navigation.
 - Category-style buttons that speak, add to the sentence, and navigate into their next board.
@@ -281,10 +323,12 @@ The first meaningful MVP should include:
 - Carer-controlled square crop/position for custom images.
 - Global local TTS settings.
 - Local usage counters and sentence/path history.
+- Exact sentence retention of about 30 days, with longer-lived aggregate stats.
 - Admin usage insights.
 - Admin modeling mode.
 - Landscape-only tablet layout designed around a 12-inch tablet first.
 - No Android internet permission.
+- Restore default layout and restore all defaults.
 
 ## Non-Goals
 
@@ -306,6 +350,8 @@ openAAC should not include these in the first version:
 - Portrait-first layout.
 - Hidden words.
 - Phrase buttons.
+- Backup/export.
+- Full icon coverage before the first usable prototype.
 
 ## Success Criteria
 
@@ -314,6 +360,7 @@ The MVP is successful if:
 - A child can build and speak useful messages without reading fluently.
 - A carer can add a new word and image without technical help.
 - A carer can rearrange a board without risking the child-facing mode.
+- Speech, backspace, tracking, and editing work reliably.
 - The app works offline.
 - The app stores all user data locally.
 - Frequent communication paths are faster than manual category browsing.
@@ -323,11 +370,11 @@ The MVP is successful if:
 
 The project goal is public source code that families can inspect, use, and customize for free, while preventing commercial resale or paid product reuse without written permission from the project owner.
 
-That goal conflicts with the standard OSI definition of open source, because OSI-approved open-source licenses allow commercial use. Until the license is finalized, the project should describe itself as public-source or source-available rather than OSI open source.
+That goal conflicts with the standard OSI definition of open source, because OSI-approved open-source licenses allow commercial use. The project should describe itself as public-source or source-available rather than OSI open source.
 
-Recommended direction to confirm:
+Chosen direction:
 
-- Use a non-commercial source-available software license.
+- Use PolyForm Noncommercial License 1.0.0.
 - Allow free personal, family, school, therapy, and non-commercial customization.
 - Require explicit written approval for selling openAAC, bundling it into a paid product, or using the code in a commercial AAC product.
 - Keep all built-in icons and third-party assets under compatible licenses with clear attribution.

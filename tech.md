@@ -23,6 +23,7 @@ The app should be designed for:
 - Android tablets.
 - Locked landscape orientation.
 - A 12-inch tablet as the first design target.
+- A layout that still works decently on 10-inch tablets.
 - APK side-loading during early development.
 - Eventual Google Play release.
 
@@ -148,6 +149,8 @@ No remote database should be used.
 
 The app should not request Android internet permission. This should be validated in code review before every release.
 
+The first-time setup flow should not ask for the child's name or any other personal identity details.
+
 ## Suggested Data Model
 
 Initial entities:
@@ -177,10 +180,13 @@ Fields may include:
 - isPinned
 - opensBoardId
 - isCategory
+- isDefault
 - createdAt
 - updatedAt
 
 Every first-version button should represent a single word. Category-style buttons can speak and add that word to the sentence, then navigate to the next board.
+
+Category-style buttons should have a small folder marker in the UI.
 
 ## VocabularyPack
 
@@ -244,6 +250,8 @@ Fields may include:
 
 Custom images should be copied into app-controlled local storage and cropped/positioned into a square thumbnail for grid display.
 
+Default icons should use simple cartoon-like symbols. Avoid facial expression icons except for clear happy and sad icons.
+
 ## NavigationRule
 
 Represents rule-based next-word suggestions or board transitions.
@@ -284,8 +292,11 @@ Fields may include:
 - sourceMode
 - startedAt
 - spokenAt
+- expiresAt
 
 `sourceMode` should distinguish normal child use from carer modeling mode so modeled language does not distort child usage insights.
+
+Exact sentence records should expire after about 30 days. Aggregated usage statistics and sequence summaries can be retained longer.
 
 ## Voice And TTS
 
@@ -298,6 +309,7 @@ The app should expose global settings for:
 - Speech rate.
 - Volume if supported.
 - Australian English preference where available.
+- Normal Android default speech speed.
 
 Important technical requirement:
 
@@ -332,6 +344,8 @@ The first version can use:
 
 - A numeric passcode.
 - Default passcode `1234` on first install.
+- Forced passcode change during first-time setup.
+- Passcode required every time admin mode is opened.
 - Stored locally.
 - Hashed before storage.
 - Reset behavior documented carefully.
@@ -363,6 +377,7 @@ Expose in admin mode:
 - Unique words used.
 - Common word pairs or paths.
 - Common full sentence patterns.
+- Modeling mode toggle.
 
 Do not send usage data off device.
 
@@ -388,6 +403,27 @@ The recommendation system should remain:
 - Non-blocking.
 
 The first implementation should support a side suggestion panel while the main board navigates into the active word/category path.
+
+## Default Board Seed
+
+The first seed data should create this home board:
+
+| Row | Button 1 | Button 2 | Button 3 | Button 4 | Button 5 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | I | you | want | need | go |
+| 2 | food | drink | toilet | people | places |
+| 3 | home | school | play | feel | body |
+| 4 | like | don't | have | things | finished |
+
+Pinned bottom strip:
+
+- yes
+- no
+- more
+- help
+- stop
+
+The pinned words should speak immediately and add to the sentence bar. `stop` can use a stop-sign style icon.
 
 ## Permissions
 
@@ -416,11 +452,14 @@ Unit tests:
 - Sentence building.
 - Delete and clear behavior.
 - Question marker behavior.
+- `?` marker speaks `hmm` and does not depend on TTS inflection.
 - Navigation rules.
 - Recommendation rules.
 - Usage summaries.
 - Modeling mode separation.
+- Exact sentence expiry after about 30 days.
 - Vocabulary pack enable/disable behavior.
+- Restore default layout and restore all defaults behavior.
 
 UI tests:
 
@@ -433,6 +472,8 @@ UI tests:
 - Long-press backspace clears the sentence.
 - Home resets the board path without clearing the sentence.
 - Question marker is visible in the sentence bar.
+- Pinned bottom strip remains available during child mode.
+- Category buttons show a folder marker.
 
 Manual device testing:
 
@@ -484,11 +525,9 @@ GitHub personal repositories cannot restrict protected-branch pushes to a named 
 
 The desired licensing model is not a standard OSI open-source model because it should block commercial resale and paid product reuse without written permission.
 
-Recommended direction:
+Chosen direction:
 
-- Use public-source/source-available wording until the license is finalized.
-- Consider PolyForm Noncommercial or a similar non-commercial software license.
-- Do not add a final `LICENSE` file until the owner confirms the non-commercial tradeoff.
+- Use PolyForm Noncommercial License 1.0.0.
 - Keep third-party icon and asset licenses compatible with non-commercial distribution and clearly attributed.
 
 ## Development Rules

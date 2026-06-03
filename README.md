@@ -1,6 +1,6 @@
 # openAAC
 
-openAAC is a planned free, public-source AAC app for Android tablets.
+OpenAAC is a planned free, public-source AAC app for Android tablets.
 
 The goal is to make a practical communication app for non-speaking autistic children and their carers without accounts, cloud storage, subscriptions, paid icon packs, or external analytics.
 
@@ -24,6 +24,7 @@ Planning docs:
 - No internet permission in the app.
 - Android tablet first.
 - Built for landscape tablet use.
+- Designed first around 12-inch tablets, while still working decently on 10-inch tablets.
 - Custom vocabulary and images from day one.
 - Admin editing protected from accidental child access.
 - Local usage insights only, never external analytics.
@@ -36,20 +37,21 @@ The MVP should include:
 
 - First-time carer setup flow.
 - Child communication mode.
-- Admin mode with default passcode `1234`.
+- Admin mode with temporary default passcode `1234`.
+- Forced admin passcode change during setup.
 - 4x5 communication grid.
-- Fixed pinned-word strip.
+- Fixed bottom pinned-word strip.
 - Top sentence bar with icons and text.
-- Speak sentence, backspace, long-press clear, and question marker controls.
+- Speak sentence, backspace, long-press clear, and `?`/`hmm` controls.
 - Configurable vocabulary packs.
 - Custom words and images.
 - Local usage tracking and admin insights.
+- Restore default layout and restore all defaults.
 
 ## License Status
 
-The license is not finalized yet.
+OpenAAC is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
 
-The intended direction is source-available/non-commercial: people should be able to inspect, use, and customize openAAC for free, but selling it, bundling it into a paid product, or using the code in a commercial AAC product should require explicit written permission from the project owner.
+People should be able to inspect, use, and customize OpenAAC for free, but selling it, bundling it into a paid product, or using the code in a commercial AAC product requires explicit written permission from the project owner.
 
-That goal is different from standard OSI open source, because OSI-approved open-source licenses allow commercial use. Until the final license is chosen, do not assume commercial reuse is permitted.
-
+That goal is different from standard OSI open source, because OSI-approved open-source licenses allow commercial use. Do not assume commercial reuse is permitted.
