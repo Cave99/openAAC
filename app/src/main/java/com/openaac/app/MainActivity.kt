@@ -1,9 +1,9 @@
 package com.openaac.app
 
-import android.app.Activity
 import android.content.Context
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -87,6 +87,11 @@ private data class SentenceToken(
     val icon: String,
 )
 
+private data class VoiceOption(
+    val name: String,
+    val label: String,
+)
+
 private object Store {
     private const val PREFS = "openaac"
     private const val KEY_SETUP = "setup_complete"
@@ -95,6 +100,8 @@ private object Store {
     private const val KEY_SENTENCES = "sentence_history"
     private const val KEY_COUNTS = "usage_counts"
     private const val KEY_TRANSITIONS = "transition_counts"
+    private const val KEY_VOICE_NAME = "voice_name"
+    private const val KEY_SPEECH_RATE = "speech_rate"
     private const val THIRTY_DAYS_MS = 30L * 24L * 60L * 60L * 1000L
 
     fun isSetup(context: Context): Boolean =
@@ -112,6 +119,20 @@ private object Store {
 
     fun savePasscode(context: Context, passcode: String) {
         prefs(context).edit().putString(KEY_PASSCODE, passcode).apply()
+    }
+
+    fun voiceName(context: Context): String? =
+        prefs(context).getString(KEY_VOICE_NAME, null)
+
+    fun saveVoiceName(context: Context, voiceName: String) {
+        prefs(context).edit().putString(KEY_VOICE_NAME, voiceName).apply()
+    }
+
+    fun speechRate(context: Context): Float =
+        prefs(context).getFloat(KEY_SPEECH_RATE, 1.0f)
+
+    fun saveSpeechRate(context: Context, rate: Float) {
+        prefs(context).edit().putFloat(KEY_SPEECH_RATE, rate.coerceIn(0.6f, 1.4f)).apply()
     }
 
     fun homeButtons(context: Context): List<VocabButton> {
@@ -138,6 +159,8 @@ private object Store {
             .remove(KEY_SENTENCES)
             .remove(KEY_COUNTS)
             .remove(KEY_TRANSITIONS)
+            .remove(KEY_VOICE_NAME)
+            .remove(KEY_SPEECH_RATE)
             .apply()
     }
 
@@ -327,16 +350,16 @@ private object Defaults {
     )
 
     val boards: Map<String, List<VocabButton>> = mapOf(
-        "i" to listOf(word("want"), word("need"), word("go", boardId = "go"), word("feel", boardId = "feel"), word("like")),
-        "you" to listOf(word("want"), word("need"), word("go", boardId = "go"), word("help"), word("stop")),
-        "want" to listOf(word("food", icon = "🍎", boardId = "food"), word("drink", icon = "🥤", boardId = "drink"), word("play", boardId = "play"), word("toilet", icon = "🚽", boardId = "toilet"), word("help")),
-        "need" to listOf(word("toilet", icon = "🚽", boardId = "toilet"), word("help"), word("drink", icon = "🥤", boardId = "drink"), word("food", icon = "🍎", boardId = "food"), word("rest")),
-        "go" to listOf(word("home", icon = "⌂"), word("school", icon = "▣"), word("toilet", icon = "🚽"), word("outside", icon = "☀"), word("shops", icon = "$")),
+        "i" to listOf(category("want", "★"), category("need", "!"), category("go", "→"), category("feel", "☺"), word("like")),
+        "you" to listOf(category("want", "★"), category("need", "!"), category("go", "→"), word("help"), word("stop")),
+        "want" to listOf(category("food", "🍎"), category("drink", "🥤"), category("play", "▶"), category("toilet", "🚽"), word("help")),
+        "need" to listOf(category("toilet", "🚽"), word("help"), category("drink", "🥤"), category("food", "🍎"), word("rest")),
+        "go" to listOf(word("home", icon = "⌂"), word("school", icon = "▣"), category("toilet", "🚽"), word("outside", icon = "☀"), word("shops", icon = "$")),
         "food" to listOf(word("apple", icon = "🍎"), word("banana", icon = "🍌"), word("bread", icon = "▭"), word("snack", icon = "□"), word("finished")),
         "drink" to listOf(word("water", icon = "💧"), word("juice", icon = "🥤"), word("milk", icon = "◯"), word("cup", icon = "∪"), word("finished")),
         "toilet" to listOf(word("toilet", icon = "🚽"), word("bathroom", icon = "🚪"), word("wash", icon = "💧"), word("now", icon = "!"), word("finished")),
         "people" to listOf(word("Mum", icon = "●"), word("Dad", icon = "●"), word("friend", icon = "●●"), word("teacher", icon = "□"), word("me", icon = "☝")),
-        "places" to listOf(word("home", icon = "⌂"), word("school", icon = "▣"), word("toilet", icon = "🚽"), word("outside", icon = "☀"), word("shops", icon = "$")),
+        "places" to listOf(word("home", icon = "⌂"), word("school", icon = "▣"), category("toilet", "🚽"), word("outside", icon = "☀"), word("shops", icon = "$")),
         "play" to listOf(word("game", icon = "▶"), word("toy", icon = "★"), word("music", icon = "♪"), word("book", icon = "▤"), word("finished")),
         "feel" to listOf(word("happy", icon = "☺"), word("sad", icon = "☹"), word("sick", icon = "+"), word("tired", icon = "z"), word("angry", icon = "!")),
         "body" to listOf(word("head", icon = "○"), word("hand", icon = "✋"), word("mouth", icon = "◡"), word("tummy", icon = "○"), word("hurts", icon = "!")),
@@ -356,6 +379,8 @@ private object Defaults {
         boardId = boardId,
         isCategory = boardId != null,
     )
+
+    private fun category(label: String, icon: String = "□") = word(label, icon, label)
 }
 
 @Composable
@@ -364,6 +389,9 @@ private fun OpenAacApp() {
     var setupComplete by remember { mutableStateOf(Store.isSetup(context)) }
     var ttsReady by remember { mutableStateOf(false) }
     var tts: TextToSpeech? by remember { mutableStateOf(null) }
+    var voiceOptions by remember { mutableStateOf(emptyList<VoiceOption>()) }
+    var selectedVoiceName by remember { mutableStateOf(Store.voiceName(context)) }
+    var speechRate by remember { mutableStateOf(Store.speechRate(context)) }
 
     DisposableEffect(Unit) {
         val engine = TextToSpeech(context) { status ->
@@ -371,12 +399,34 @@ private fun OpenAacApp() {
                 ttsReady = true
             }
         }
-        val voices = engine.voices
-        val auVoice = voices?.firstOrNull { it.locale.language == "en" && it.locale.country == "AU" && !it.isNetworkConnectionRequired }
-        if (auVoice != null) engine.voice = auVoice else engine.language = Locale.ENGLISH
-        engine.setSpeechRate(1.0f)
         tts = engine
         onDispose { engine.shutdown() }
+    }
+
+    LaunchedEffect(ttsReady, selectedVoiceName, speechRate) {
+        val engine = tts ?: return@LaunchedEffect
+        if (!ttsReady) return@LaunchedEffect
+        val localEnglishVoices = engine.voices
+            ?.filter { it.locale.language == "en" && !it.isNetworkConnectionRequired }
+            ?.sortedWith(compareByDescending<Voice> { it.locale.country == "AU" }.thenBy { it.locale.displayName }.thenBy { it.name })
+            .orEmpty()
+        voiceOptions = localEnglishVoices.map { voice ->
+            VoiceOption(voice.name, "${voice.locale.displayName} (${voice.name.takeLast(10)})")
+        }
+        val targetName = selectedVoiceName
+            ?: localEnglishVoices.firstOrNull { it.locale.country == "AU" }?.name
+            ?: localEnglishVoices.firstOrNull()?.name
+        val targetVoice = localEnglishVoices.firstOrNull { it.name == targetName }
+        if (targetVoice != null) {
+            engine.voice = targetVoice
+            if (selectedVoiceName != targetVoice.name) {
+                selectedVoiceName = targetVoice.name
+                Store.saveVoiceName(context, targetVoice.name)
+            }
+        } else {
+            engine.language = Locale.ENGLISH
+        }
+        engine.setSpeechRate(speechRate)
     }
 
     val speak: (String) -> Unit = { text ->
@@ -389,7 +439,20 @@ private fun OpenAacApp() {
             setupComplete = true
         })
     } else {
-        CommunicatorScreen(speak = speak)
+        CommunicatorScreen(
+            speak = speak,
+            voiceOptions = voiceOptions,
+            selectedVoiceName = selectedVoiceName,
+            speechRate = speechRate,
+            onVoiceSelected = {
+                selectedVoiceName = it
+                Store.saveVoiceName(context, it)
+            },
+            onSpeechRateChanged = {
+                speechRate = it.coerceIn(0.6f, 1.4f)
+                Store.saveSpeechRate(context, speechRate)
+            },
+        )
     }
 }
 
@@ -439,7 +502,14 @@ private fun SetupScreen(onComplete: (String) -> Unit) {
 }
 
 @Composable
-private fun CommunicatorScreen(speak: (String) -> Unit) {
+private fun CommunicatorScreen(
+    speak: (String) -> Unit,
+    voiceOptions: List<VoiceOption>,
+    selectedVoiceName: String?,
+    speechRate: Float,
+    onVoiceSelected: (String) -> Unit,
+    onSpeechRateChanged: (Float) -> Unit,
+) {
     val context = LocalContext.current
     val sentence = remember { mutableStateListOf<SentenceToken>() }
     val boardStack = remember { mutableStateListOf<String>() }
@@ -544,7 +614,15 @@ private fun CommunicatorScreen(speak: (String) -> Unit) {
                 homeButtons = Defaults.home
                 sentence.clear()
                 boardStack.clear()
+                onSpeechRateChanged(1.0f)
+                voiceOptions.firstOrNull()?.let { onVoiceSelected(it.name) }
             },
+            voiceOptions = voiceOptions,
+            selectedVoiceName = selectedVoiceName,
+            speechRate = speechRate,
+            onVoiceSelected = onVoiceSelected,
+            onSpeechRateChanged = onSpeechRateChanged,
+            onTestVoice = { speak("I want food") },
             onClose = { showAdmin = false },
         )
     }
@@ -622,18 +700,27 @@ private fun ButtonGrid(buttons: List<VocabButton>, modifier: Modifier, onTap: (V
 
 @Composable
 private fun VocabTile(button: VocabButton, modifier: Modifier, onTap: (VocabButton) -> Unit) {
+    val isFolder = button.isCategory || button.boardId != null
     Button(
         modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = Color(button.color)),
+        shape = if (isFolder) RoundedCornerShape(topStart = 18.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 8.dp) else RoundedCornerShape(8.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = if (isFolder) Color(0xFFFFF4BF) else Color(button.color)),
         onClick = { onTap(button) },
     ) {
         Box(Modifier.fillMaxSize()) {
-            if (button.isCategory || button.boardId != null) {
-                Text("▣", modifier = Modifier.align(Alignment.TopEnd), color = Color(0xFF56616F), fontSize = 14.sp)
+            if (isFolder) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .width(40.dp)
+                        .height(14.dp)
+                        .clip(RoundedCornerShape(topStart = 7.dp, topEnd = 7.dp))
+                        .background(Color(0xFFFFC94D))
+                )
+                Text("folder", modifier = Modifier.align(Alignment.TopEnd), color = Color(0xFF6B5300), fontSize = 10.sp)
             }
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(button.icon, fontSize = if (button.icon.length > 3) 18.sp else 31.sp, color = Color.Black, maxLines = 1)
+                Text(if (isFolder) "📁" else button.icon, fontSize = if (isFolder) 34.sp else if (button.icon.length > 3) 18.sp else 31.sp, color = Color.Black, maxLines = 1)
                 Text(button.label, color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -663,6 +750,7 @@ private fun SuggestionsPanel(result: RecommendationResult, onTap: (VocabButton) 
         Text("quick", fontWeight = FontWeight.Bold, color = Color(0xFF56616F))
         Text(result.status, fontSize = 11.sp, color = Color(0xFF56616F), lineHeight = 12.sp)
         result.buttons.forEach { button ->
+            val isFolder = button.isCategory || button.boardId != null
             Button(
                 onClick = { onTap(button) },
                 modifier = Modifier
@@ -672,7 +760,7 @@ private fun SuggestionsPanel(result: RecommendationResult, onTap: (VocabButton) 
                 colors = ButtonDefaults.buttonColors(containerColor = Color.White),
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(button.icon, fontSize = if (button.icon.length > 3) 13.sp else 20.sp, color = Color.Black, maxLines = 1)
+                    Text(if (isFolder) "📁" else button.icon, fontSize = if (isFolder) 21.sp else if (button.icon.length > 3) 13.sp else 20.sp, color = Color.Black, maxLines = 1)
                     Text(button.label, fontSize = 15.sp, color = Color.Black, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -751,10 +839,17 @@ private fun AdminScreen(
     onButtonsChanged: (List<VocabButton>) -> Unit,
     onRestoreLayout: () -> Unit,
     onRestoreAll: () -> Unit,
+    voiceOptions: List<VoiceOption>,
+    selectedVoiceName: String?,
+    speechRate: Float,
+    onVoiceSelected: (String) -> Unit,
+    onSpeechRateChanged: (Float) -> Unit,
+    onTestVoice: () -> Unit,
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
     var editingIndex by remember { mutableStateOf<Int?>(null) }
+    var selectedIndex by remember { mutableStateOf<Int?>(null) }
     val usage = remember { mutableStateMapOf<String, Int>() }
     LaunchedEffect(Unit) {
         usage.clear()
@@ -773,31 +868,33 @@ private fun AdminScreen(
                     Button(onClick = onClose) { Text("done") }
                 }
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    LazyColumn(Modifier.weight(1.4f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        itemsIndexed(homeButtons) { index, item ->
-                            Row(
-                                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFFF2F6FA)).padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Text("${index + 1}. ${item.icon} ${item.label}", Modifier.weight(1f), fontSize = 18.sp)
-                                OutlinedButton(enabled = index > 0, onClick = {
-                                    val next = homeButtons.toMutableList()
-                                    val moved = next.removeAt(index)
-                                    next.add(index - 1, moved)
-                                    onButtonsChanged(next)
-                                }) { Text("up") }
-                                OutlinedButton(enabled = index < homeButtons.lastIndex, onClick = {
-                                    val next = homeButtons.toMutableList()
-                                    val moved = next.removeAt(index)
-                                    next.add(index + 1, moved)
-                                    onButtonsChanged(next)
-                                }) { Text("down") }
-                                Button(onClick = { editingIndex = index }) { Text("edit") }
+                    AdminLayoutGrid(
+                        buttons = homeButtons,
+                        selectedIndex = selectedIndex,
+                        onSelect = { tapped ->
+                            val selected = selectedIndex
+                            if (selected == null) {
+                                selectedIndex = tapped
+                            } else {
+                                val next = homeButtons.toMutableList()
+                                val moved = next.removeAt(selected)
+                                next.add(tapped.coerceIn(0, next.size), moved)
+                                onButtonsChanged(next)
+                                selectedIndex = null
                             }
-                        }
-                    }
+                        },
+                        onEdit = { editingIndex = it },
+                        modifier = Modifier.weight(1.45f),
+                    )
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        VoiceControls(
+                            voiceOptions = voiceOptions,
+                            selectedVoiceName = selectedVoiceName,
+                            speechRate = speechRate,
+                            onVoiceSelected = onVoiceSelected,
+                            onSpeechRateChanged = onSpeechRateChanged,
+                            onTestVoice = onTestVoice,
+                        )
                         Text("Local usage", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                         if (usage.isEmpty()) Text("No words tracked yet.")
                         usage.forEach { (word, count) ->
@@ -809,6 +906,11 @@ private fun AdminScreen(
                             next.add(VocabButton("custom_${System.currentTimeMillis()}", "new", "new", "□", 0xFFFFFFFF))
                             onButtonsChanged(next.take(20))
                         }) { Text("add home word") }
+                        selectedIndex?.let { index ->
+                            OutlinedButton(onClick = { selectedIndex = null }) {
+                                Text("cancel move ${index + 1}")
+                            }
+                        }
                     }
                 }
             }
@@ -830,10 +932,108 @@ private fun AdminScreen(
 }
 
 @Composable
+private fun AdminLayoutGrid(
+    buttons: List<VocabButton>,
+    selectedIndex: Int?,
+    onSelect: (Int) -> Unit,
+    onEdit: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Layout editor", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Tap a tile, then tap where it should move. Use edit to change words or folder paths.", fontSize = 13.sp, color = Color(0xFF56616F))
+        buttons.chunked(5).take(4).forEachIndexed { rowIndex, row ->
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEachIndexed { columnIndex, button ->
+                    val index = rowIndex * 5 + columnIndex
+                    AdminTile(
+                        button = button,
+                        selected = selectedIndex == index,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        onMoveTap = { onSelect(index) },
+                        onEdit = { onEdit(index) },
+                    )
+                }
+                repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminTile(
+    button: VocabButton,
+    selected: Boolean,
+    modifier: Modifier,
+    onMoveTap: () -> Unit,
+    onEdit: () -> Unit,
+) {
+    val isFolder = button.isCategory || button.boardId != null
+    Column(
+        modifier
+            .clip(if (isFolder) RoundedCornerShape(topStart = 18.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 8.dp) else RoundedCornerShape(8.dp))
+            .background(if (selected) Color(0xFFD9E8FF) else if (isFolder) Color(0xFFFFF4BF) else Color(0xFFF2F6FA))
+            .border(2.dp, if (selected) Color(0xFF2166F3) else Color.Transparent, RoundedCornerShape(8.dp))
+            .padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(if (isFolder) "📁" else button.icon, fontSize = if (isFolder) 25.sp else 22.sp)
+        Text(button.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            OutlinedButton(onClick = onMoveTap, modifier = Modifier.height(32.dp)) { Text("move", fontSize = 11.sp) }
+            Button(onClick = onEdit, modifier = Modifier.height(32.dp)) { Text("edit", fontSize = 11.sp) }
+        }
+    }
+}
+
+@Composable
+private fun VoiceControls(
+    voiceOptions: List<VoiceOption>,
+    selectedVoiceName: String?,
+    speechRate: Float,
+    onVoiceSelected: (String) -> Unit,
+    onSpeechRateChanged: (Float) -> Unit,
+    onTestVoice: () -> Unit,
+) {
+    val currentIndex = voiceOptions.indexOfFirst { it.name == selectedVoiceName }.takeIf { it >= 0 } ?: 0
+    val current = voiceOptions.getOrNull(currentIndex)
+    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFF2F6FA))) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Voice", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(current?.label ?: "Default Android English voice", fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    enabled = voiceOptions.size > 1,
+                    onClick = {
+                        val previous = if (currentIndex <= 0) voiceOptions.lastIndex else currentIndex - 1
+                        voiceOptions.getOrNull(previous)?.let { onVoiceSelected(it.name) }
+                    },
+                ) { Text("prev") }
+                OutlinedButton(
+                    enabled = voiceOptions.size > 1,
+                    onClick = {
+                        val next = if (currentIndex >= voiceOptions.lastIndex) 0 else currentIndex + 1
+                        voiceOptions.getOrNull(next)?.let { onVoiceSelected(it.name) }
+                    },
+                ) { Text("next") }
+                Button(onClick = onTestVoice) { Text("test") }
+            }
+            Text("Speed ${(speechRate * 100).toInt()}%", fontSize = 14.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onSpeechRateChanged(speechRate - 0.1f) }) { Text("slower") }
+                OutlinedButton(onClick = { onSpeechRateChanged(speechRate + 0.1f) }) { Text("faster") }
+            }
+        }
+    }
+}
+
+@Composable
 private fun EditButtonDialog(item: VocabButton, onDismiss: () -> Unit, onSave: (VocabButton) -> Unit) {
     var label by remember(item.id) { mutableStateOf(item.label) }
     var speech by remember(item.id) { mutableStateOf(item.speech) }
     var icon by remember(item.id) { mutableStateOf(item.icon) }
+    var folderPath by remember(item.id) { mutableStateOf(item.boardId.orEmpty()) }
 
     FullScreenOverlay {
         Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
@@ -845,11 +1045,23 @@ private fun EditButtonDialog(item: VocabButton, onDismiss: () -> Unit, onSave: (
                 OutlinedTextField(speech, { speech = it.take(32) }, label = { Text("Speech") })
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(icon, { icon = it.take(4) }, label = { Text("Icon text") })
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(folderPath, { folderPath = it.lowercase(Locale.ROOT).filter { char -> char.isLetterOrDigit() || char == '_' }.take(20) }, label = { Text("Folder path, blank for normal word") })
+                Text("Examples: want, need, food, drink, toilet, people, places, play, feel, body, things", fontSize = 12.sp, color = Color(0xFF56616F), textAlign = TextAlign.Center)
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(onClick = onDismiss) { Text("cancel") }
                     Button(onClick = {
-                        onSave(item.copy(label = label.ifBlank { item.label }, speech = speech.ifBlank { label }, icon = icon.ifBlank { "□" }))
+                        val normalizedPath = folderPath.ifBlank { null }
+                        onSave(
+                            item.copy(
+                                label = label.ifBlank { item.label },
+                                speech = speech.ifBlank { label },
+                                icon = icon.ifBlank { "□" },
+                                boardId = normalizedPath,
+                                isCategory = normalizedPath != null,
+                            )
+                        )
                     }) { Text("save") }
                 }
             }
