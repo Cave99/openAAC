@@ -95,34 +95,34 @@ import java.io.File
 import java.util.Locale
 
 
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enterImmersiveMode()
-        setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF5F7FA)) {
-                    OpenAacApp()
-                }
-            }
+class FolderShape(
+    private val cornerRadius: Dp = 8.dp,
+    private val tabWidthPercent: Float = 0.30f,
+    private val tabHeight: Dp = 10.dp,
+) : Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density
+    ): Outline {
+        val r = cornerRadius.value * density.density
+        val tabW = size.width * tabWidthPercent
+        val tabH = kotlin.math.min(size.height * 0.20f, tabHeight.value * density.density)
+        val path = Path().apply {
+            moveTo(0f, size.height - r)
+            quadraticTo(0f, size.height, r, size.height)
+            lineTo(size.width - r, size.height)
+            quadraticTo(size.width, size.height, size.width, size.height - r)
+            lineTo(size.width, tabH + r)
+            quadraticTo(size.width, tabH, size.width - r, tabH)
+            lineTo(tabW, tabH)
+            lineTo(tabW, r)
+            quadraticTo(tabW, 0f, tabW - r, 0f)
+            lineTo(r, 0f)
+            quadraticTo(0f, 0f, 0f, r)
+            lineTo(0f, tabH)
+            close()
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        enterImmersiveMode()
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) enterImmersiveMode()
-    }
-
-    private fun enterImmersiveMode() {
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            hide(WindowInsetsCompat.Type.systemBars())
-        }
+        return Outline.Generic(path)
     }
 }

@@ -95,34 +95,72 @@ import java.io.File
 import java.util.Locale
 
 
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enterImmersiveMode()
-        setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF5F7FA)) {
-                    OpenAacApp()
-                }
-            }
-        }
-    }
+data class VocabButton(
+    val id: String,
+    val label: String,
+    val speech: String,
+    val icon: String,
+    val color: Long,
+    val boardId: String? = null,
+    val isCategory: Boolean = false,
+    val imagePath: String? = null,
+    val addToSentence: Boolean = true,
+)
 
-    override fun onResume() {
-        super.onResume()
-        enterImmersiveMode()
-    }
+data class SentenceToken(
+    val label: String,
+    val speech: String,
+    val icon: String,
+    val imagePath: String?,
+)
 
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) enterImmersiveMode()
-    }
+data class VoiceOption(
+    val name: String,
+    val label: String,
+)
 
-    private fun enterImmersiveMode() {
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            hide(WindowInsetsCompat.Type.systemBars())
-        }
-    }
+data class ChildProfile(
+    val id: String,
+    val name: String,
+)
+
+data class UsageInsights(
+    val uniqueWordsThisMonth: Int,
+    val uniqueWordsPreviousMonth: Int,
+    val uniqueTrend: Int,
+    val topWords: List<Pair<String, Int>>,
+    val topSentences: List<Pair<String, Int>>,
+)
+
+data class RecommendationScore(
+    val button: VocabButton,
+    val score: Int,
+    val reason: String,
+)
+
+data class RecommendationResult(
+    val buttons: List<VocabButton>,
+    val status: String,
+)
+
+data class FolderColorOption(
+    val label: String,
+    val value: Long,
+)
+
+fun String.normalizedId(): String =
+    lowercase(Locale.ROOT)
+        .trim()
+        .replace(" ", "_")
+        .filter { it.isLetterOrDigit() || it == '_' }
+
+enum class DropAction {
+    MoveBefore,
+    MoveAfter,
+    MoveIntoFolder,
 }
+
+data class DropPreview(
+    val targetIndex: Int,
+    val action: DropAction,
+)
