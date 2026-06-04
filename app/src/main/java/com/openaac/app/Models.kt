@@ -95,34 +95,91 @@ import java.io.File
 import java.util.Locale
 
 
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enterImmersiveMode()
-        setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF5F7FA)) {
-                    OpenAacApp()
-                }
-            }
-        }
-    }
+data class VocabButton(
+    val id: String,
+    val label: String,
+    val speech: String,
+    val icon: String,
+    val color: Long,
+    val boardId: String? = null,
+    val isCategory: Boolean = false,
+    val imagePath: String? = null,
+    val addToSentence: Boolean = true,
+    val grammarRole: GrammarRole = inferGrammarRole(label = label, speech = speech, boardId = boardId),
+)
 
-    override fun onResume() {
-        super.onResume()
-        enterImmersiveMode()
-    }
+data class SentenceToken(
+    val label: String,
+    val speech: String,
+    val icon: String,
+    val imagePath: String?,
+    val grammarRole: GrammarRole = inferGrammarRole(label = label, speech = speech),
+    val boardId: String? = null,
+)
 
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) enterImmersiveMode()
-    }
-
-    private fun enterImmersiveMode() {
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            hide(WindowInsetsCompat.Type.systemBars())
-        }
-    }
+enum class GrammarRole(val title: String, val help: String) {
+    Subject("Subject", "I, you, Mum, Dad, teacher"),
+    Intent("Intent", "want, need"),
+    Negation("Negation", "don't, do not, not"),
+    Action("Action", "go, help, play, wash, like"),
+    Object("Object", "toy, book, blanket, general things"),
+    FoodDrink("Food or drink", "water, apple, snack, cup"),
+    Place("Place", "home, school, outside, shops"),
+    Toilet("Toilet", "toilet, bathroom"),
+    Feeling("Feeling", "happy, sad, sick, tired"),
+    BodyPart("Body part", "head, hand, tummy, mouth"),
+    Modifier("Modifier", "now, more"),
+    Response("Response", "yes, no, finished, stop"),
+    None("No grammar", "speak exactly as tapped"),
 }
+
+data class VoiceOption(
+    val name: String,
+    val label: String,
+)
+
+data class ChildProfile(
+    val id: String,
+    val name: String,
+)
+
+data class UsageInsights(
+    val uniqueWordsThisMonth: Int,
+    val uniqueWordsPreviousMonth: Int,
+    val uniqueTrend: Int,
+    val topWords: List<Pair<String, Int>>,
+    val topSentences: List<Pair<String, Int>>,
+)
+
+data class RecommendationScore(
+    val button: VocabButton,
+    val score: Int,
+    val reason: String,
+)
+
+data class RecommendationResult(
+    val buttons: List<VocabButton>,
+    val status: String,
+)
+
+data class FolderColorOption(
+    val label: String,
+    val value: Long,
+)
+
+fun String.normalizedId(): String =
+    lowercase(Locale.ROOT)
+        .trim()
+        .replace(" ", "_")
+        .filter { it.isLetterOrDigit() || it == '_' }
+
+enum class DropAction {
+    MoveBefore,
+    MoveAfter,
+    MoveIntoFolder,
+}
+
+data class DropPreview(
+    val targetIndex: Int,
+    val action: DropAction,
+)

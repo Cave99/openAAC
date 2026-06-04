@@ -17,13 +17,34 @@ export ANDROID_HOME := $(LOCAL_ANDROID_HOME)
 export PATH := $(JAVA_HOME)/bin:$(ANDROID_HOME)/platform-tools:$(PATH)
 endif
 
-.PHONY: APK apk tablet install uninstall clean
+.PHONY: APK apk check doctor lint test tablet install uninstall clean
 
 APK:
 	$(GRADLEW) assembleDebug
 	@echo "Updated $(APK_PATH)"
 
 apk: APK
+
+check: doctor
+	$(GRADLEW) check
+
+lint: doctor
+	$(GRADLEW) lint
+
+test: doctor
+	$(GRADLEW) testDebugUnitTest
+
+doctor:
+	@java_version="$$(java -version 2>&1 | awk -F '"' '/version/ { print $$2 }')"; \
+	major="$$(printf '%s\n' "$$java_version" | awk -F. '{ if ($$1 == "1") print $$2; else print $$1 }')"; \
+	if [[ -z "$$major" || "$$major" -lt 17 ]]; then \
+		echo "Java 17+ is required. Current java version: $${java_version:-unknown}"; \
+		echo "This Makefile will use JAVA_HOME=$(JAVA_HOME) when available."; \
+		exit 1; \
+	fi
+	@[[ -n "$$ANDROID_HOME" ]] || { echo "ANDROID_HOME is not set"; exit 1; }
+	@echo "Java: $$(java -version 2>&1 | sed -n '1p')"
+	@echo "ANDROID_HOME=$$ANDROID_HOME"
 
 tablet: APK
 	@command -v $(ADB) >/dev/null 2>&1 || { echo "adb was not found on PATH"; exit 1; }
