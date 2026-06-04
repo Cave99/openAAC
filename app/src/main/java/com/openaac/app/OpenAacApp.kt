@@ -150,15 +150,35 @@ fun OpenAacApp() {
         if (!ttsReady) return@LaunchedEffect
         val localEnglishVoices = engine.voices
             ?.filter { it.locale.language == "en" && !it.isNetworkConnectionRequired }
-            ?.sortedWith(compareByDescending<Voice> { it.locale.country == "AU" }.thenBy { it.locale.displayName }.thenBy { it.name })
+            ?.sortedWith(
+                compareByDescending<Voice> { it.locale.country == "AU" }
+                    .thenByDescending { it.quality }
+                    .thenBy { it.locale.displayName }
+                    .thenBy { it.name },
+            )
             .orEmpty()
+        val localeCounts = mutableMapOf<String, Int>()
         voiceOptions = localEnglishVoices.map { voice ->
-            VoiceOption(voice.name, "${voice.locale.displayName} (${voice.name.takeLast(10)})")
+            val quality = when (voice.quality) {
+                Voice.QUALITY_VERY_HIGH -> "very high quality"
+                Voice.QUALITY_HIGH -> "high quality"
+                Voice.QUALITY_NORMAL -> "standard quality"
+                Voice.QUALITY_LOW -> "low quality"
+                Voice.QUALITY_VERY_LOW -> "very low quality"
+                else -> "quality ${voice.quality}"
+            }
+            val localeLabel = voice.locale.displayName.ifBlank { "English" }
+            val localeNumber = (localeCounts[localeLabel] ?: 0) + 1
+            localeCounts[localeLabel] = localeNumber
+            VoiceOption(
+                name = voice.name,
+                label = "$localeLabel $localeNumber",
+                detail = "$quality, ${voice.name}",
+            )
         }
-        val targetName = selectedVoiceName
-            ?: localEnglishVoices.firstOrNull { it.locale.country == "AU" }?.name
-            ?: localEnglishVoices.firstOrNull()?.name
-        val targetVoice = localEnglishVoices.firstOrNull { it.name == targetName }
+        val targetVoice = localEnglishVoices.firstOrNull { it.name == selectedVoiceName }
+            ?: localEnglishVoices.firstOrNull { it.locale.country == "AU" }
+            ?: localEnglishVoices.firstOrNull()
         if (targetVoice != null) {
             engine.voice = targetVoice
             if (selectedVoiceName != targetVoice.name) {
@@ -275,4 +295,3 @@ fun SetupScreen(onComplete: (String) -> Unit) {
         }
     }
 }
-

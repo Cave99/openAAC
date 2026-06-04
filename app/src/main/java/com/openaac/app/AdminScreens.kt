@@ -205,6 +205,7 @@ fun AdminScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         VoiceControls(
+                            currentProfile = currentProfile,
                             voiceOptions = voiceOptions,
                             selectedVoiceName = selectedVoiceName,
                             speechRate = speechRate,
@@ -434,6 +435,7 @@ fun ConfirmDeleteDialog(label: String, onDismiss: () -> Unit, onConfirm: () -> U
 
 @Composable
 fun VoiceControls(
+    currentProfile: ChildProfile,
     voiceOptions: List<VoiceOption>,
     selectedVoiceName: String?,
     speechRate: Float,
@@ -446,7 +448,8 @@ fun VoiceControls(
     var expanded by remember { mutableStateOf(false) }
     Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFF2F6FA))) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Voice", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Voice for ${currentProfile.name}", fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Saved to this profile", fontSize = 13.sp, color = Color(0xFF56616F))
             Box {
                 OutlinedButton(
                     enabled = voiceOptions.isNotEmpty(),
@@ -472,15 +475,19 @@ fun VoiceControls(
                     }
                 }
             }
+            current?.detail?.let { detail ->
+                Text(detail, fontSize = 12.sp, color = Color(0xFF56616F), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Button(onClick = onTestVoice) { Text("test") }
                 Text("Speed ${(speechRate * 100).toInt()}%", fontSize = 14.sp, color = Color(0xFF56616F))
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onSpeechRateChanged(speechRate - 0.1f) }) { Text("slower") }
-                OutlinedButton(onClick = { onSpeechRateChanged(speechRate + 0.1f) }) { Text("faster") }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { onSpeechRateChanged(speechRate - 0.1f) }) { Text("slower") }
+                    OutlinedButton(onClick = { onSpeechRateChanged(speechRate + 0.1f) }) { Text("faster") }
+                }
             }
         }
     }
 }
-

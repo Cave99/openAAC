@@ -117,6 +117,7 @@ data class SentenceToken(
 data class VoiceOption(
     val name: String,
     val label: String,
+    val detail: String,
 )
 
 data class ChildProfile(
