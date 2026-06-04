@@ -192,4 +192,21 @@ object BoardEditor {
     }
 }
 
+object SentenceEditor {
+    fun moveToken(
+        sentence: List<SentenceToken>,
+        fromIndex: Int,
+        toIndex: Int,
+        action: DropAction,
+    ): List<SentenceToken> {
+        if (fromIndex !in sentence.indices || toIndex !in sentence.indices || fromIndex == toIndex) return sentence
+        val next = sentence.toMutableList()
+        val item = next.removeAt(fromIndex)
+        val insertionIndex = if (action == DropAction.MoveAfter) toIndex + 1 else toIndex
+        val adjustedIndex = if (fromIndex < insertionIndex) insertionIndex - 1 else insertionIndex
+        next.add(adjustedIndex.coerceIn(0, next.size), item)
+        return next
+    }
+}
+
 fun String.normalizedLabel(): String = lowercase(Locale.ROOT).trim()

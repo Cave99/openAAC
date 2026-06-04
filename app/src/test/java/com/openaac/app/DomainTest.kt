@@ -92,4 +92,19 @@ class DomainTest {
         assertEquals("!", result.getValue(Defaults.HOME_BOARD).first().icon)
         assertEquals(false, result.getValue(Defaults.HOME_BOARD).first().addToSentence)
     }
+
+    @Test
+    fun sentenceEditorMovesTokenBeforeAndAfterTarget() {
+        val sentence = listOf(
+            SentenceToken("I", "I", "I", null),
+            SentenceToken("want", "want", "W", null),
+            SentenceToken("water", "water", "D", null),
+        )
+
+        val movedAfter = SentenceEditor.moveToken(sentence, fromIndex = 0, toIndex = 1, action = DropAction.MoveAfter)
+        assertEquals(listOf("want", "I", "water"), movedAfter.map { it.label })
+
+        val movedBefore = SentenceEditor.moveToken(sentence, fromIndex = 2, toIndex = 0, action = DropAction.MoveBefore)
+        assertEquals(listOf("water", "I", "want"), movedBefore.map { it.label })
+    }
 }

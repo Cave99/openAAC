@@ -75,6 +75,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -89,6 +90,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.zIndex
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -141,11 +143,15 @@ fun SentenceBar(
     onBackspace: () -> Unit,
     onClear: () -> Unit,
     onRemoveAt: (Int) -> Unit,
+    onMove: (Int, Int, DropAction) -> Unit,
     onAdmin: () -> Unit,
 ) {
     var selectedIndex by remember { mutableStateOf<Int?>(null) }
+    var dropPreview by remember { mutableStateOf<DropPreview?>(null) }
     LaunchedEffect(sentence.size) {
         if (selectedIndex != null && selectedIndex !in sentence.indices) selectedIndex = null
+        val preview = dropPreview
+        if (preview != null && preview.targetIndex !in sentence.indices) dropPreview = null
     }
     Row(
         Modifier
@@ -173,9 +179,12 @@ fun SentenceBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             sentence.forEachIndexed { index, token ->
-                SentenceChip(
+                ReorderableSentenceChip(
                     token = token,
+                    index = index,
+                    sentenceSize = sentence.size,
                     selected = selectedIndex == index,
+                    dropPreview = dropPreview?.takeIf { it.targetIndex == index }?.action,
                     onTap = {
                         if (selectedIndex == index) {
                             onRemoveAt(index)
@@ -184,6 +193,11 @@ fun SentenceBar(
                             selectedIndex = index
                         }
                     },
+                    onMove = { fromIndex, toIndex, action ->
+                        onMove(fromIndex, toIndex, action)
+                        selectedIndex = null
+                    },
+                    onDropPreview = { dropPreview = it },
                 )
             }
         }
@@ -197,16 +211,111 @@ fun SentenceBar(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun SentenceChip(token: SentenceToken, selected: Boolean, onTap: () -> Unit) {
+fun ReorderableSentenceChip(
+    token: SentenceToken,
+    index: Int,
+    sentenceSize: Int,
+    selected: Boolean,
+    dropPreview: DropAction?,
+    onTap: () -> Unit,
+    onMove: (Int, Int, DropAction) -> Unit,
+    onDropPreview: (DropPreview?) -> Unit,
+) {
+    val density = LocalDensity.current
+    val chipSpacingPx = with(density) { 8.dp.toPx() }
+    var dragX by remember { mutableStateOf(0f) }
+    var dragY by remember { mutableStateOf(0f) }
+    var dragging by remember { mutableStateOf(false) }
+    val dragModifier = Modifier.pointerInput(index, sentenceSize) {
+        fun currentDropPreview(): DropPreview {
+            val chipWidth = size.width.toFloat().coerceAtLeast(1f)
+            val stepWidth = chipWidth + chipSpacingPx
+            val projectedCenterX = ((index + 0.5f) * stepWidth) + dragX
+            val targetIndex = kotlin.math.floor(projectedCenterX / stepWidth).toInt().coerceIn(0, sentenceSize - 1)
+            val targetCenterX = (targetIndex + 0.5f) * stepWidth
+            val action = if (projectedCenterX > targetCenterX) DropAction.MoveAfter else DropAction.MoveBefore
+            return DropPreview(targetIndex = targetIndex, action = action)
+        }
+        detectDragGestures(
+            onDragStart = {
+                dragging = true
+                onDropPreview(currentDropPreview())
+            },
+            onDragEnd = {
+                val preview = currentDropPreview()
+                onMove(index, preview.targetIndex, preview.action)
+                onDropPreview(null)
+                dragX = 0f
+                dragY = 0f
+                dragging = false
+            },
+            onDragCancel = {
+                onDropPreview(null)
+                dragX = 0f
+                dragY = 0f
+                dragging = false
+            },
+            onDrag = { change, dragAmount ->
+                change.consume()
+                dragX += dragAmount.x
+                dragY += dragAmount.y
+                onDropPreview(currentDropPreview())
+            },
+        )
+    }
+
+    SentenceChip(
+        token = token,
+        selected = selected,
+        dropPreview = dropPreview,
+        dragging = dragging,
+        modifier = Modifier
+            .then(dragModifier)
+            .zIndex(if (dragging) 1f else 0f)
+            .graphicsLayer {
+                translationX = dragX
+                translationY = dragY
+                shadowElevation = if (dragging) 12f else 0f
+                scaleX = if (dragging) 1.04f else 1f
+                scaleY = if (dragging) 1.04f else 1f
+            },
+        onTap = onTap,
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun SentenceChip(
+    token: SentenceToken,
+    selected: Boolean,
+    dropPreview: DropAction? = null,
+    dragging: Boolean = false,
+    modifier: Modifier = Modifier,
+    onTap: () -> Unit,
+) {
     Box(
-        Modifier
+        modifier
             .width(82.dp)
             .fillMaxHeight()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) Color(0xFFFFE6E6) else Color(0xFFF2F6FA))
+            .background(
+                when {
+                    dragging -> Color.White
+                    selected -> Color(0xFFFFE6E6)
+                    else -> Color(0xFFF2F6FA)
+                },
+            )
             .border(
-                width = if (selected) 3.dp else 0.dp,
-                color = if (selected) Color(0xFFE05555) else Color.Transparent,
+                width = when {
+                    dragging -> 3.dp
+                    selected -> 3.dp
+                    else -> 0.dp
+                },
+                color = when {
+                    dragging -> Color(0xFF2166F3)
+                    selected -> Color(0xFFE05555)
+                    else -> Color.Transparent
+                },
                 shape = RoundedCornerShape(8.dp),
             )
             .combinedClickable(onClick = onTap),
@@ -219,7 +328,7 @@ fun SentenceChip(token: SentenceToken, selected: Boolean, onTap: () -> Unit) {
             ButtonVisual(icon = token.icon, imagePath = token.imagePath, modifier = Modifier.size(36.dp), iconFontSize = 24)
             Text(token.label, fontSize = 15.sp, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        if (selected) {
+        if (selected && !dragging) {
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
@@ -230,6 +339,24 @@ fun SentenceChip(token: SentenceToken, selected: Boolean, onTap: () -> Unit) {
             ) {
                 Text("×", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
+        }
+        dropPreview?.let { preview ->
+            val align = if (preview == DropAction.MoveAfter) Alignment.CenterEnd else Alignment.CenterStart
+            Box(
+                Modifier
+                    .align(align)
+                    .fillMaxHeight()
+                    .width(6.dp)
+                    .background(Color(0xFF2166F3)),
+            )
+            Box(
+                Modifier
+                    .align(if (preview == DropAction.MoveAfter) Alignment.BottomEnd else Alignment.BottomStart)
+                    .padding(bottom = 6.dp)
+                    .size(14.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(Color(0xFF2166F3)),
+            )
         }
     }
 }
@@ -585,4 +712,3 @@ fun BackspaceButton(onBackspace: () -> Unit) {
         }
     }
 }
-

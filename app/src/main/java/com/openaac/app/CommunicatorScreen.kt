@@ -186,6 +186,12 @@ fun CommunicatorScreen(
         draftBoards = BoardEditor.addButton(draftBoards, currentBoardId, button)
     }
 
+    fun moveSentenceToken(fromIndex: Int, toIndex: Int, action: DropAction) {
+        val reordered = SentenceEditor.moveToken(sentence.toList(), fromIndex, toIndex, action)
+        sentence.clear()
+        sentence.addAll(reordered)
+    }
+
     Row(Modifier.fillMaxSize().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (reorganizing) {
@@ -224,6 +230,7 @@ fun CommunicatorScreen(
                     onRemoveAt = { index ->
                         if (index in sentence.indices) sentence.removeAt(index)
                     },
+                    onMove = ::moveSentenceToken,
                     onAdmin = { showAdminLogin = true },
                 )
             }
